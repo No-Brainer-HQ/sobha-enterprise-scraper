@@ -16,8 +16,7 @@
             "type": "string",
             "description": "Your secure Sobha Partner Portal password. This field is encrypted and secure.",
             "editor": "textfield",
-            "isSecret": true,
-            "minLength": 8
+            "isSecret": true
         },
         "scrapeMode": {
             "title": "Scraping Mode",
@@ -53,7 +52,7 @@
         "parallelRequests": {
             "title": "Concurrent Processing Threads",
             "type": "integer",
-            "description": "Number of parallel browser instances for faster processing. Higher values = faster scraping but may trigger rate limits.",
+            "description": "Number of parallel browser instances for faster processing.",
             "default": 3,
             "minimum": 1,
             "maximum": 10
@@ -69,7 +68,7 @@
         "retryAttempts": {
             "title": "Error Recovery Attempts",
             "type": "integer",
-            "description": "Number of automatic retry attempts for failed requests (enterprise resilience).",
+            "description": "Number of automatic retry attempts for failed requests.",
             "default": 3,
             "minimum": 1,
             "maximum": 5
@@ -77,16 +76,15 @@
         "enableStealth": {
             "title": "Advanced Stealth Mode",
             "type": "boolean",
-            "description": "Enable enterprise-grade anti-detection measures including browser fingerprint masking and behavioral randomization.",
+            "description": "Enable enterprise-grade anti-detection measures.",
             "default": true
         },
         "downloadDocuments": {
             "title": "Document Extraction",
             "type": "boolean",
-            "description": "Download PDF quotations and floorplans for comprehensive property analysis (slower but more detailed).",
+            "description": "Download PDF quotations and floorplans for comprehensive analysis.",
             "default": false
         }
     },
-    "required": ["email", "password"],
-    "additionalProperties": false
+    "required": ["email", "password"]
 }
