@@ -59,11 +59,11 @@
         },
         "requestDelay": {
             "title": "Request Delay (seconds)",
-            "type": "number",
-            "description": "Base delay between requests to respect server resources and avoid blocking.",
-            "default": 2.0,
-            "minimum": 0.5,
-            "maximum": 10.0
+            "type": "integer",
+            "description": "Base delay between requests in seconds to respect server resources and avoid blocking.",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 10
         },
         "retryAttempts": {
             "title": "Error Recovery Attempts",
@@ -76,13 +76,13 @@
         "enableStealth": {
             "title": "Advanced Stealth Mode",
             "type": "boolean",
-            "description": "Enable enterprise-grade anti-detection measures.",
+            "description": "Enable enterprise-grade anti-detection measures including browser fingerprint masking.",
             "default": true
         },
         "downloadDocuments": {
             "title": "Document Extraction",
             "type": "boolean",
-            "description": "Download PDF quotations and floorplans for comprehensive analysis.",
+            "description": "Download PDF quotations and floorplans for comprehensive property analysis.",
             "default": false
         }
     },
