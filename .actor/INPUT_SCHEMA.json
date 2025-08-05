@@ -1,89 +1,35 @@
 {
-    "title": "Enterprise Sobha Portal Scraper Input",
-    "description": "Configuration for the enterprise-grade Sobha Partner Portal scraper built for BARACA Life Capital Real Estate.",
+    "title": "Enterprise Sobha Portal Scraper",
+    "description": "Bulk scraping of all Sobha properties with minimal configuration required.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "email": {
-            "title": "Sobha Portal Email Address",
+            "title": "Sobha Portal Email",
             "type": "string",
-            "description": "Your verified Sobha Partner Portal email address for authentication.",
-            "editor": "textfield",
-            "example": "asos@asosharsin.com"
+            "description": "Your Sobha Partner Portal email address.",
+            "editor": "textfield"
         },
         "password": {
             "title": "Sobha Portal Password",
             "type": "string",
-            "description": "Your secure Sobha Partner Portal password. This field is encrypted and secure.",
+            "description": "Your Sobha Partner Portal password.",
             "editor": "textfield",
             "isSecret": true
         },
-        "scrapeMode": {
-            "title": "Scraping Mode",
-            "type": "string",
-            "description": "Choose your scraping strategy: 'bulk' for multiple properties or 'specific' for targeted unit lookup.",
-            "editor": "select",
-            "enum": ["bulk", "specific"],
-            "enumTitles": ["Bulk Scraping - Multiple Properties", "Specific Unit - Single Property"],
-            "default": "bulk"
-        },
-        "filters": {
-            "title": "Advanced Property Filters",
-            "type": "object",
-            "description": "Apply intelligent filters for bulk scraping. Example: {'bedrooms': '1 Bed Type C', 'project': 'Sobha SeaHaven', 'price': '1M-2M'}",
-            "editor": "json",
-            "prefill": {}
-        },
-        "specificUnit": {
-            "title": "Specific Unit Details",
-            "type": "object",
-            "description": "For specific unit targeting (use with 'specific' scrape mode). Example: {'unitNo': 'SSH-A4105', 'project': 'Sobha SeaHaven'}",
-            "editor": "json",
-            "prefill": {}
-        },
         "maxResults": {
-            "title": "Maximum Results Limit",
+            "title": "Maximum Properties to Scrape",
             "type": "integer",
-            "description": "Maximum number of properties to extract. Enterprise limit: 10,000 for performance optimization.",
-            "default": 1000,
-            "minimum": 1,
+            "description": "Leave as 5000 to get all available properties.",
+            "default": 5000,
+            "minimum": 100,
             "maximum": 10000
         },
-        "parallelRequests": {
-            "title": "Concurrent Processing Threads",
-            "type": "integer",
-            "description": "Number of parallel browser instances for faster processing.",
-            "default": 3,
-            "minimum": 1,
-            "maximum": 10
-        },
-        "requestDelay": {
-            "title": "Request Delay (seconds)",
-            "type": "integer",
-            "description": "Base delay between requests in seconds to respect server resources and avoid blocking.",
-            "default": 2,
-            "minimum": 1,
-            "maximum": 10
-        },
-        "retryAttempts": {
-            "title": "Error Recovery Attempts",
-            "type": "integer",
-            "description": "Number of automatic retry attempts for failed requests.",
-            "default": 3,
-            "minimum": 1,
-            "maximum": 5
-        },
         "enableStealth": {
-            "title": "Advanced Stealth Mode",
+            "title": "Enable Anti-Detection",
             "type": "boolean",
-            "description": "Enable enterprise-grade anti-detection measures including browser fingerprint masking.",
+            "description": "Keep enabled to avoid being blocked.",
             "default": true
-        },
-        "downloadDocuments": {
-            "title": "Document Extraction",
-            "type": "boolean",
-            "description": "Download PDF quotations and floorplans for comprehensive property analysis.",
-            "default": false
         }
     },
     "required": ["email", "password"]
