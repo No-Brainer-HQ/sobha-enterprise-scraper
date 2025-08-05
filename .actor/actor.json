@@ -1,0 +1,40 @@
+{
+  "actorSpecification": 1,
+  "name": "sobha-enterprise-portal-scraper",
+  "title": "Enterprise Sobha Partner Portal Scraper",
+  "description": "Production-grade scraper for Sobha Partner Portal built for multi-billion dollar enterprise operations. Features comprehensive authentication, intelligent filtering, advanced error recovery, performance monitoring, and enterprise security standards.",
+  "version": "1.0",
+  "meta": {
+    "templateId": "javascript-crawlee-playwright"
+  },
+  "input": "./INPUT_SCHEMA.json",
+  "dockerfile": "./Dockerfile",
+  "readme": "./README.md",
+  "categories": [
+    "REAL_ESTATE"
+  ],
+  "keywords": [
+    "sobha",
+    "real-estate",
+    "property-data",
+    "dubai",
+    "partner-portal",
+    "enterprise",
+    "scraping",
+    "playwright",
+    "crawlee",
+    "production",
+    "baraca"
+  ],
+  "author": {
+    "name": "BARACA Life Capital Real Estate",
+    "email": "engineering@baraca.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/sobha-enterprise-scraper.git"
+  },
+  "license": "PROPRIETARY",
+  "storeFeatured": false,
+  "isPublic": false
+}
