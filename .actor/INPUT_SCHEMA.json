@@ -1,58 +1,92 @@
-
 {
     "title": "Enterprise Sobha Portal Scraper Input",
-    "description": "Configuration for the enterprise-grade Sobha Partner Portal scraper.",
+    "description": "Configuration for the enterprise-grade Sobha Partner Portal scraper built for BARACA Life Capital Real Estate.",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "email": {
-            "title": "Sobha Portal Email",
+            "title": "Sobha Portal Email Address",
             "type": "string",
-            "description": "Your login email for the Sobha Partner Portal.",
-            "editor": "textfield"
+            "description": "Your verified Sobha Partner Portal email address for authentication.",
+            "editor": "textfield",
+            "example": "asos@asosharsin.com"
         },
         "password": {
             "title": "Sobha Portal Password",
             "type": "string",
-            "description": "Your login password. This is a secret field.",
-            "editor": "secret"
+            "description": "Your secure Sobha Partner Portal password. This field is encrypted and secure.",
+            "editor": "textfield",
+            "isSecret": true,
+            "minLength": 8
         },
         "scrapeMode": {
-            "title": "Scrape Mode",
+            "title": "Scraping Mode",
             "type": "string",
-            "description": "Choose 'bulk' to scrape multiple properties or 'specific' for a single unit.",
+            "description": "Choose your scraping strategy: 'bulk' for multiple properties or 'specific' for targeted unit lookup.",
             "editor": "select",
             "enum": ["bulk", "specific"],
+            "enumTitles": ["Bulk Scraping - Multiple Properties", "Specific Unit - Single Property"],
             "default": "bulk"
         },
         "filters": {
-            "title": "Property Filters",
+            "title": "Advanced Property Filters",
             "type": "object",
-            "description": "Apply filters for bulk scraping. E.g., {\"bedrooms\": \"1 Bed Type C\", \"project\": \"Sobha SeaHaven\"}",
-            "editor": "json"
+            "description": "Apply intelligent filters for bulk scraping. Example: {'bedrooms': '1 Bed Type C', 'project': 'Sobha SeaHaven', 'price': '1M-2M'}",
+            "editor": "json",
+            "prefill": {}
+        },
+        "specificUnit": {
+            "title": "Specific Unit Details",
+            "type": "object",
+            "description": "For specific unit targeting (use with 'specific' scrape mode). Example: {'unitNo': 'SSH-A4105', 'project': 'Sobha SeaHaven'}",
+            "editor": "json",
+            "prefill": {}
         },
         "maxResults": {
-            "title": "Maximum Results",
+            "title": "Maximum Results Limit",
             "type": "integer",
-            "description": "The maximum number of properties to scrape.",
+            "description": "Maximum number of properties to extract. Enterprise limit: 10,000 for performance optimization.",
             "default": 1000,
             "minimum": 1,
             "maximum": 10000
         },
         "parallelRequests": {
-            "title": "Parallel Requests",
+            "title": "Concurrent Processing Threads",
             "type": "integer",
-            "description": "Number of parallel browser instances to run.",
+            "description": "Number of parallel browser instances for faster processing. Higher values = faster scraping but may trigger rate limits.",
             "default": 3,
             "minimum": 1,
             "maximum": 10
         },
+        "requestDelay": {
+            "title": "Request Delay (seconds)",
+            "type": "number",
+            "description": "Base delay between requests to respect server resources and avoid blocking.",
+            "default": 2.0,
+            "minimum": 0.5,
+            "maximum": 10.0
+        },
+        "retryAttempts": {
+            "title": "Error Recovery Attempts",
+            "type": "integer",
+            "description": "Number of automatic retry attempts for failed requests (enterprise resilience).",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 5
+        },
         "enableStealth": {
-            "title": "Enable Stealth Mode",
+            "title": "Advanced Stealth Mode",
             "type": "boolean",
-            "description": "Use advanced techniques to avoid anti-bot detection.",
+            "description": "Enable enterprise-grade anti-detection measures including browser fingerprint masking and behavioral randomization.",
             "default": true
+        },
+        "downloadDocuments": {
+            "title": "Document Extraction",
+            "type": "boolean",
+            "description": "Download PDF quotations and floorplans for comprehensive property analysis (slower but more detailed).",
+            "default": false
         }
     },
-    "required": ["email", "password"]
+    "required": ["email", "password"],
+    "additionalProperties": false
 }
