@@ -104,7 +104,7 @@ class SecurityManager {
     static sanitizeInput(input) {
         if (typeof input !== 'string') return String(input);
         // Remove potentially dangerous characters
-        return input.replace(/[<>&"';--\/\*]/g, '').trim();
+        return input.replace(/[<>&"';\-\/\*]/g, '').trim();
     }
 }
 
