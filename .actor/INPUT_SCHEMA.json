@@ -1,1 +1,58 @@
 
+{
+    "title": "Enterprise Sobha Portal Scraper Input",
+    "description": "Configuration for the enterprise-grade Sobha Partner Portal scraper.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "email": {
+            "title": "Sobha Portal Email",
+            "type": "string",
+            "description": "Your login email for the Sobha Partner Portal.",
+            "editor": "textfield"
+        },
+        "password": {
+            "title": "Sobha Portal Password",
+            "type": "string",
+            "description": "Your login password. This is a secret field.",
+            "editor": "secret"
+        },
+        "scrapeMode": {
+            "title": "Scrape Mode",
+            "type": "string",
+            "description": "Choose 'bulk' to scrape multiple properties or 'specific' for a single unit.",
+            "editor": "select",
+            "enum": ["bulk", "specific"],
+            "default": "bulk"
+        },
+        "filters": {
+            "title": "Property Filters",
+            "type": "object",
+            "description": "Apply filters for bulk scraping. E.g., {\"bedrooms\": \"1 Bed Type C\", \"project\": \"Sobha SeaHaven\"}",
+            "editor": "json"
+        },
+        "maxResults": {
+            "title": "Maximum Results",
+            "type": "integer",
+            "description": "The maximum number of properties to scrape.",
+            "default": 1000,
+            "minimum": 1,
+            "maximum": 10000
+        },
+        "parallelRequests": {
+            "title": "Parallel Requests",
+            "type": "integer",
+            "description": "Number of parallel browser instances to run.",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 10
+        },
+        "enableStealth": {
+            "title": "Enable Stealth Mode",
+            "type": "boolean",
+            "description": "Use advanced techniques to avoid anti-bot detection.",
+            "default": true
+        }
+    },
+    "required": ["email", "password"]
+}
