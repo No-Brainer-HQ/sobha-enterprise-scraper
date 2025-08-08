@@ -35,11 +35,33 @@ const CONFIG = {
     // Portal endpoints
     LOGIN_URL: 'https://www.sobhapartnerportal.com/partnerportal/s/',
     
-    // Selectors (production-ready)
+    // Selectors (production-ready with enhanced login button detection)
     SELECTORS: {
-        email: 'input[type="email"], input[placeholder*="email"], input[name*="email"]',
-        password: 'input[type="password"], input[placeholder*="password"], input[name*="password"]',
-        loginButton: 'button[type="submit"], button:has-text("Sign in"), .btn:has-text("Sign in")',
+        email: 'input[type="email"], input[placeholder*="email"], input[name*="email"], input[id*="email"]',
+        password: 'input[type="password"], input[placeholder*="password"], input[name*="password"], input[id*="password"]',
+        loginButton: [
+            // Try multiple button selector patterns
+            'button[type="submit"]',
+            'input[type="submit"]',
+            'button:has-text("Sign in")',
+            'button:has-text("Login")', 
+            'button:has-text("Log in")',
+            'button:has-text("Enter")',
+            'button:has-text("Submit")',
+            '.btn:has-text("Sign in")',
+            '.btn:has-text("Login")',
+            '.login-btn',
+            '.submit-btn',
+            '[data-cy="login"]',
+            '[data-testid="login"]',
+            'button[class*="login"]',
+            'button[class*="submit"]',
+            'form button',
+            'form input[type="submit"]',
+            '[role="button"]:has-text("Sign")',
+            '[role="button"]:has-text("Login")',
+            'a[href*="login"]'
+        ],
         dashboardIndicator: 'text=BARACA LIFE CAPITAL REAL ESTATE, text=Dashboard, text=My Dashboard',
         projectsNavigation: 'text=Sobha Projects',
         filterBed: 'text=Select Bed',
