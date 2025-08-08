@@ -75,7 +75,19 @@ class EnterpriseLogger {
         };
 
         console.log(JSON.stringify(logEntry));
-        Actor.log[level.toLowerCase()](message, data);
+        
+        // Safely call Actor.log methods with fallback
+        try {
+            const logMethod = level.toLowerCase();
+            if (Actor.log && typeof Actor.log[logMethod] === 'function') {
+                Actor.log[logMethod](message, data);
+            } else {
+                // Fallback to console if Actor.log method doesn't exist
+                console.log(`${level}: ${message}`, data);
+            }
+        } catch (logError) {
+            console.log(`${level}: ${message}`, data);
+        }
     }
 
     info(message, data) { this.log('INFO', message, data); }
@@ -781,7 +793,8 @@ async function main() {
             console.log('Input validation successful');
         } catch (validationError) {
             console.error('Input validation failed:', validationError.message);
-            if (Actor.log) {
+            // Safe Actor.log usage
+            if (Actor.log && typeof Actor.log.error === 'function') {
                 Actor.log.error('Input validation failed', { error: validationError.message });
             }
             await Actor.fail(`Input validation failed: ${validationError.message}`);
@@ -798,7 +811,7 @@ async function main() {
 
         if (results.success) {
             console.log('Scraping completed successfully');
-            if (Actor.log) {
+            if (Actor.log && typeof Actor.log.info === 'function') {
                 Actor.log.info('Enterprise scraping completed successfully', {
                     sessionId: results.sessionId,
                     successRate: results.metrics.successRate,
@@ -807,7 +820,7 @@ async function main() {
             }
         } else {
             console.error('Scraping failed:', results.error);
-            if (Actor.log) {
+            if (Actor.log && typeof Actor.log.error === 'function') {
                 Actor.log.error('Enterprise scraping failed', { error: results.error });
             }
             await Actor.fail(`Scraping failed: ${results.error}`);
@@ -819,7 +832,7 @@ async function main() {
         console.error('Stack trace:', error.stack);
         
         // Use console.error as fallback if Actor.log is not available
-        if (Actor.log) {
+        if (Actor.log && typeof Actor.log.error === 'function') {
             Actor.log.error('Critical error in enterprise actor', { 
                 error: error.message,
                 stack: error.stack 
