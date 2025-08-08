@@ -765,48 +765,53 @@ class EnterpriseSobhaPortalScraper {
 /**
  * MAIN ENTERPRISE ACTOR ENTRY POINT
  */
-await Actor.init();
+async function main() {
+    await Actor.init();
 
-try {
-    // Get and validate input
-    const actorInput = await Actor.getInput() ?? {};
-    
-    // Enterprise input validation
-    let validatedInput;
     try {
-        validatedInput = InputValidator.validate(actorInput);
-    } catch (validationError) {
-        Actor.log.error('Input validation failed', { error: validationError.message });
-        await Actor.fail(`Input validation failed: ${validationError.message}`);
-        // ✅ REMOVED: return; statement - this was causing the syntax error
-    }
+        // Get and validate input
+        const actorInput = await Actor.getInput() ?? {};
+        
+        // Enterprise input validation
+        let validatedInput;
+        try {
+            validatedInput = InputValidator.validate(actorInput);
+        } catch (validationError) {
+            Actor.log.error('Input validation failed', { error: validationError.message });
+            await Actor.fail(`Input validation failed: ${validationError.message}`);
+            return; // Now we can use return inside a function
+        }
 
-    // Initialize enterprise scraper
-    const scraper = new EnterpriseSobhaPortalScraper(validatedInput);
+        // Initialize enterprise scraper
+        const scraper = new EnterpriseSobhaPortalScraper(validatedInput);
 
-    // Execute enterprise scraping workflow
-    const results = await scraper.executeScraping();
+        // Execute enterprise scraping workflow
+        const results = await scraper.executeScraping();
 
-    if (results.success) {
-        Actor.log.info('Enterprise scraping completed successfully', {
-            sessionId: results.sessionId,
-            successRate: results.metrics.successRate,
-            propertiesScraped: results.metrics.propertiesScraped
+        if (results.success) {
+            Actor.log.info('Enterprise scraping completed successfully', {
+                sessionId: results.sessionId,
+                successRate: results.metrics.successRate,
+                propertiesScraped: results.metrics.propertiesScraped
+            });
+        } else {
+            Actor.log.error('Enterprise scraping failed', { error: results.error });
+            await Actor.fail(`Scraping failed: ${results.error}`);
+            return; // Now we can use return inside a function
+        }
+
+    } catch (error) {
+        Actor.log.error('Critical error in enterprise actor', { 
+            error: error.message,
+            stack: error.stack 
         });
-    } else {
-        Actor.log.error('Enterprise scraping failed', { error: results.error });
-        await Actor.fail(`Scraping failed: ${results.error}`);
-        // ✅ REMOVED: return; statement - this was causing the syntax error
+        await Actor.fail(`Critical error: ${error.message}`);
+        return; // Now we can use return inside a function
     }
 
-} catch (error) {
-    Actor.log.error('Critical error in enterprise actor', { 
-        error: error.message,
-        stack: error.stack 
-    });
-    await Actor.fail(`Critical error: ${error.message}`);
-    // ✅ REMOVED: return; statement - this was causing the syntax error
+    // Exit successfully
+    await Actor.exit();
 }
 
-// Exit successfully
-await Actor.exit();
+// Execute the main function
+await main();
