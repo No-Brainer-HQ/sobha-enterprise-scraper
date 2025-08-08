@@ -87,6 +87,9 @@ class EnterpriseLogger {
 /**
  * Enterprise Security Manager
  */
+/**
+ * Enterprise Security Manager (FIXED VERSION)
+ */
 class SecurityManager {
     static generateSessionId() {
         return createHash('md5')
@@ -103,7 +106,7 @@ class SecurityManager {
 
     static sanitizeInput(input) {
         if (typeof input !== 'string') return String(input);
-        // Remove potentially dangerous characters
+        // Fixed regex: escape the hyphen and remove potentially dangerous characters
         return input.replace(/[<>&"';\-\/\*]/g, '').trim();
     }
 }
