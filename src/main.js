@@ -766,51 +766,80 @@ class EnterpriseSobhaPortalScraper {
  * MAIN ENTERPRISE ACTOR ENTRY POINT
  */
 async function main() {
-    await Actor.init();
-
     try {
+        await Actor.init();
+        console.log('Actor initialized successfully');
+
         // Get and validate input
         const actorInput = await Actor.getInput() ?? {};
+        console.log('Actor input received:', { hasEmail: !!actorInput.email, hasPassword: !!actorInput.password });
         
         // Enterprise input validation
         let validatedInput;
         try {
             validatedInput = InputValidator.validate(actorInput);
+            console.log('Input validation successful');
         } catch (validationError) {
-            Actor.log.error('Input validation failed', { error: validationError.message });
+            console.error('Input validation failed:', validationError.message);
+            if (Actor.log) {
+                Actor.log.error('Input validation failed', { error: validationError.message });
+            }
             await Actor.fail(`Input validation failed: ${validationError.message}`);
-            return; // Now we can use return inside a function
+            return;
         }
 
         // Initialize enterprise scraper
+        console.log('Initializing enterprise scraper...');
         const scraper = new EnterpriseSobhaPortalScraper(validatedInput);
 
         // Execute enterprise scraping workflow
+        console.log('Starting scraping workflow...');
         const results = await scraper.executeScraping();
 
         if (results.success) {
-            Actor.log.info('Enterprise scraping completed successfully', {
-                sessionId: results.sessionId,
-                successRate: results.metrics.successRate,
-                propertiesScraped: results.metrics.propertiesScraped
-            });
+            console.log('Scraping completed successfully');
+            if (Actor.log) {
+                Actor.log.info('Enterprise scraping completed successfully', {
+                    sessionId: results.sessionId,
+                    successRate: results.metrics.successRate,
+                    propertiesScraped: results.metrics.propertiesScraped
+                });
+            }
         } else {
-            Actor.log.error('Enterprise scraping failed', { error: results.error });
+            console.error('Scraping failed:', results.error);
+            if (Actor.log) {
+                Actor.log.error('Enterprise scraping failed', { error: results.error });
+            }
             await Actor.fail(`Scraping failed: ${results.error}`);
-            return; // Now we can use return inside a function
+            return;
         }
 
     } catch (error) {
-        Actor.log.error('Critical error in enterprise actor', { 
-            error: error.message,
-            stack: error.stack 
-        });
-        await Actor.fail(`Critical error: ${error.message}`);
-        return; // Now we can use return inside a function
+        console.error('Critical error in enterprise actor:', error.message);
+        console.error('Stack trace:', error.stack);
+        
+        // Use console.error as fallback if Actor.log is not available
+        if (Actor.log) {
+            Actor.log.error('Critical error in enterprise actor', { 
+                error: error.message,
+                stack: error.stack 
+            });
+        }
+        
+        try {
+            await Actor.fail(`Critical error: ${error.message}`);
+        } catch (failError) {
+            console.error('Failed to call Actor.fail():', failError.message);
+        }
+        return;
     }
 
     // Exit successfully
-    await Actor.exit();
+    try {
+        await Actor.exit();
+    } catch (exitError) {
+        console.error('Failed to exit actor:', exitError.message);
+    }
 }
 
 // Execute the main function
