@@ -451,6 +451,9 @@ class EnterpriseSobhaPortalScraper {
 
                     // CRITICAL FIX: Dismiss the promotional modal that appears after login
                     await this.dismissPostLoginModal(page);
+                    
+                    // Additional wait to ensure modal is fully dismissed
+                    await page.waitForTimeout(3000);
 
                     // If we've navigated away from the initial login URL, consider it successful
                     if (currentUrl !== CONFIG.LOGIN_URL) {
@@ -515,41 +518,59 @@ class EnterpriseSobhaPortalScraper {
             this.logger.info('Checking for post-login promotional modal');
 
             // Wait a moment for the modal to appear
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(3000);
 
-            // Check if the modal exists
-            const modalExists = await page.locator('.slds-modal.slds-fade-in-open').count() > 0;
+            // Check if the modal exists with extended detection
+            const modalSelectors = [
+                '.slds-modal.slds-fade-in-open',
+                '.slds-modal.slds-modal_full',
+                '[role="dialog"][aria-modal="true"]',
+                'section[role="dialog"]'
+            ];
+
+            let modalExists = false;
+            for (const selector of modalSelectors) {
+                const count = await page.locator(selector).count();
+                if (count > 0) {
+                    modalExists = true;
+                    this.logger.info(`Modal detected with selector: ${selector}`);
+                    break;
+                }
+            }
             
             if (modalExists) {
-                this.logger.info('Promotional modal detected, attempting to close it');
+                this.logger.info('Promotional modal detected, attempting to close it with aggressive methods');
 
-                // Try multiple close button selectors for Salesforce Lightning modals
-                const closeSelectors = [
-                    'button[aria-label="Close"]',
-                    '.slds-modal__close',
-                    'button.slds-modal__close',
-                    '.slds-button.slds-modal__close',
-                    'button[title="Close"]',
-                    '.slds-modal .slds-button[aria-label="Close"]',
+                // Method 1: Try clicking X button in the top-right corner of modal
+                const xButtonSelectors = [
+                    '.slds-modal button[title="Close"]',
+                    '.slds-modal [data-key="close"]',
+                    '.slds-modal .slds-button_icon',
+                    '.slds-modal button[aria-label*="Close"]',
+                    '.slds-modal button[aria-label*="close"]',
+                    '.slds-modal .slds-modal__close',
+                    // Look for the actual X symbol
                     '.slds-modal button:has-text("×")',
                     '.slds-modal button:has-text("✕")',
-                    '.slds-modal [data-key="close"]',
-                    // Generic close button in modal
-                    '.slds-modal button[type="button"]'
+                    '.slds-modal lightning-button-icon',
+                    // Generic close button in modal header
+                    '.slds-modal header button',
+                    '.slds-modal .slds-modal__header button'
                 ];
 
                 let modalClosed = false;
-                for (const selector of closeSelectors) {
+                for (const selector of xButtonSelectors) {
                     try {
                         this.logger.debug(`Trying close button selector: ${selector}`);
                         
-                        // Check if the close button exists and is visible
                         const closeButton = page.locator(selector).first();
                         const isVisible = await closeButton.isVisible().catch(() => false);
                         
                         if (isVisible) {
                             this.logger.info(`Found close button with selector: ${selector}`);
-                            await closeButton.click();
+                            
+                            // Force click with JavaScript to bypass modal blocking
+                            await closeButton.evaluate(el => el.click());
                             
                             // Wait for modal to disappear
                             await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
@@ -557,7 +578,7 @@ class EnterpriseSobhaPortalScraper {
                                 timeout: 5000 
                             });
                             
-                            this.logger.info('✅ Modal successfully closed');
+                            this.logger.info('✅ Modal successfully closed with close button');
                             modalClosed = true;
                             break;
                         }
@@ -566,11 +587,15 @@ class EnterpriseSobhaPortalScraper {
                     }
                 }
 
-                // If normal close buttons don't work, try pressing Escape key
+                // Method 2: Try pressing Escape key multiple times
                 if (!modalClosed) {
                     this.logger.info('Trying to close modal with Escape key');
                     try {
-                        await page.keyboard.press('Escape');
+                        for (let i = 0; i < 3; i++) {
+                            await page.keyboard.press('Escape');
+                            await page.waitForTimeout(1000);
+                        }
+                        
                         await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
                             state: 'detached', 
                             timeout: 3000 
@@ -582,12 +607,47 @@ class EnterpriseSobhaPortalScraper {
                     }
                 }
 
-                // If still not closed, try clicking outside the modal
+                // Method 3: Force remove modal with JavaScript
+                if (!modalClosed) {
+                    this.logger.info('Trying to force remove modal with JavaScript');
+                    try {
+                        await page.evaluate(() => {
+                            // Remove all modal elements
+                            const modals = document.querySelectorAll('.slds-modal, [role="dialog"], .slds-backdrop');
+                            modals.forEach(modal => {
+                                if (modal && modal.parentNode) {
+                                    modal.parentNode.removeChild(modal);
+                                }
+                            });
+                            
+                            // Remove backdrop
+                            const backdrops = document.querySelectorAll('.slds-backdrop, .modal-backdrop');
+                            backdrops.forEach(backdrop => {
+                                if (backdrop && backdrop.parentNode) {
+                                    backdrop.parentNode.removeChild(backdrop);
+                                }
+                            });
+                            
+                            // Re-enable pointer events on body
+                            document.body.style.pointerEvents = 'auto';
+                            document.body.style.overflow = 'auto';
+                        });
+                        
+                        this.logger.info('✅ Modal force-removed with JavaScript');
+                        modalClosed = true;
+                    } catch (jsError) {
+                        this.logger.debug('JavaScript modal removal failed');
+                    }
+                }
+
+                // Method 4: Click outside modal area (backdrop)
                 if (!modalClosed) {
                     this.logger.info('Trying to close modal by clicking backdrop');
                     try {
-                        // Click on the modal backdrop (outside the modal content)
-                        await page.locator('.slds-backdrop').click();
+                        // Click on the backdrop area (outside the modal content)
+                        await page.mouse.click(100, 100); // Top-left corner
+                        await page.waitForTimeout(1000);
+                        
                         await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
                             state: 'detached', 
                             timeout: 3000 
@@ -600,12 +660,11 @@ class EnterpriseSobhaPortalScraper {
                 }
 
                 if (!modalClosed) {
-                    this.logger.warn('Could not close promotional modal, proceeding anyway');
-                    // Continue execution even if modal couldn't be closed
+                    this.logger.warn('Could not close promotional modal with any method, attempting to continue anyway');
                 }
 
-                // Wait a moment for any animations to complete
-                await page.waitForTimeout(1000);
+                // Final wait for any animations to complete
+                await page.waitForTimeout(2000);
 
             } else {
                 this.logger.info('No promotional modal detected');
@@ -811,87 +870,217 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Extract property data with enterprise validation
+     * Extract property data with enterprise validation - ENHANCED for Sobha Portal
      */
     async extractPropertyData(page) {
         try {
             this.logger.info('Starting property data extraction');
 
-            // First, analyze the page structure to find data tables/elements
+            // Wait for any modals to be dismissed first
+            await page.waitForTimeout(2000);
+
+            // First, try to dismiss any remaining modals that might be blocking content
+            await this.dismissPostLoginModal(page);
+
+            // Analyze the page structure to find data elements
             const pageStructure = await page.evaluate(() => {
                 return {
                     tables: document.querySelectorAll('table').length,
                     dataRows: document.querySelectorAll('tr, [role="row"]').length,
                     listItems: document.querySelectorAll('li, .list-item, .property-item').length,
+                    cards: document.querySelectorAll('.card, .property-card, .unit-card, [class*="card"]').length,
+                    sobhaElements: document.querySelectorAll('[class*="sobha"], [class*="property"], [class*="unit"]').length,
+                    salesforceRecords: document.querySelectorAll('[data-record-id], [data-row-key-value]').length,
                     hasData: document.body.textContent.length
                 };
             });
 
-            this.logger.info('Page structure analysis:', pageStructure);
+            this.logger.info('Enhanced page structure analysis:', pageStructure);
 
-            // Try multiple approaches to find data
             let extractedData = [];
 
-            // Approach 1: Traditional table extraction
+            // Approach 1: Look for Salesforce Lightning data components (most likely)
             try {
-                await page.waitForSelector(CONFIG.SELECTORS.resultsTable, { timeout: 10000 });
+                this.logger.info('Trying Salesforce Lightning data extraction');
                 
                 extractedData = await page.evaluate((maxResults) => {
-                    const rows = document.querySelectorAll('table tbody tr, .table tbody tr, [role="row"]:not(:first-child)');
                     const results = [];
                     
-                    for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
-                        try {
-                            const row = rows[i];
-                            const cells = row.querySelectorAll('td, [role="cell"]');
-                            
-                            if (cells.length >= 7) {
-                                const project = cells[0]?.textContent?.trim() || '';
-                                const subProject = cells[1]?.textContent?.trim() || '';
-                                const unitType = cells[2]?.textContent?.trim() || '';
-                                const floor = cells[3]?.textContent?.trim() || '';
-                                const unitNo = cells[4]?.textContent?.trim() || '';
-                                const totalUnitArea = cells[5]?.textContent?.trim() || '';
-                                const startingPrice = cells[6]?.textContent?.trim() || '';
+                    // Look for Lightning data table rows or records
+                    const lightningSelectors = [
+                        '[data-row-key-value]',  // Lightning data table rows
+                        '[data-record-id]',      // Salesforce record elements
+                        '.slds-table tbody tr',   // Lightning design system table
+                        '[role="row"]:not([role="columnheader"])', // Accessible table rows
+                        '.sobha-property',        // Custom Sobha property elements
+                        '.property-row',          // Generic property rows
+                        '[class*="property"]',    // Any element with "property" in class name
+                        '[class*="unit"]'         // Any element with "unit" in class name
+                    ];
+                    
+                    for (const selector of lightningSelectors) {
+                        const elements = document.querySelectorAll(selector);
+                        console.log(`Found ${elements.length} elements with selector: ${selector}`);
+                        
+                        if (elements.length > 0) {
+                            for (let i = 0; i < Math.min(elements.length, maxResults); i++) {
+                                const element = elements[i];
+                                const text = element.textContent?.trim() || '';
                                 
-                                const unitId = `${project}_${unitNo}_${Date.now()}_${i}`.replace(/[^a-zA-Z0-9_]/g, '');
-                                
-                                if (project && unitNo && startingPrice) {
-                                    results.push({
-                                        unitId,
-                                        project,
-                                        subProject,
-                                        unitType,
-                                        floor,
-                                        unitNo,
-                                        totalUnitArea,
-                                        startingPrice,
-                                        availability: 'available',
-                                        sourceUrl: window.location.href,
-                                        scrapedAt: new Date().toISOString()
-                                    });
+                                // Skip navigation elements
+                                if (text.length > 20 && 
+                                    !text.includes('Dashboard') && 
+                                    !text.includes('Profile') && 
+                                    !text.includes('About') &&
+                                    !text.includes('Marketing')) {
+                                    
+                                    // Try to extract structured data from the element
+                                    const cells = element.querySelectorAll('td, .cell, [role="cell"], .field-value');
+                                    const links = element.querySelectorAll('a');
+                                    const spans = element.querySelectorAll('span');
+                                    
+                                    let project = '';
+                                    let unitNo = '';
+                                    let price = '';
+                                    let area = '';
+                                    let floor = '';
+                                    let unitType = '';
+                                    
+                                    // Extract data from cells if available
+                                    if (cells.length >= 3) {
+                                        project = cells[0]?.textContent?.trim() || '';
+                                        unitType = cells[1]?.textContent?.trim() || '';
+                                        unitNo = cells[2]?.textContent?.trim() || '';
+                                        area = cells[3]?.textContent?.trim() || '';
+                                        price = cells[4]?.textContent?.trim() || '';
+                                        floor = cells[5]?.textContent?.trim() || '';
+                                    } else {
+                                        // Try to parse from text content
+                                        const textParts = text.split(/\s+/);
+                                        
+                                        // Look for patterns in the text
+                                        for (const part of textParts) {
+                                            if (part.match(/^[A-Z]\d+/)) { // Unit number pattern
+                                                unitNo = part;
+                                            } else if (part.match(/\d+\s*(sqft|sq\.?ft\.?|square)/i)) { // Area pattern
+                                                area = part;
+                                            } else if (part.match(/\d+[\d,]*\s*(aed|usd|\$)/i)) { // Price pattern
+                                                price = part;
+                                            } else if (part.match(/^(ground|g|basement|b|\d+)(st|nd|rd|th)?\s*floor/i)) { // Floor pattern
+                                                floor = part;
+                                            }
+                                        }
+                                        
+                                        // If no structured data found, use element content
+                                        if (!project) project = text.substring(0, 50);
+                                        if (!unitNo) unitNo = `Unit-${i + 1}`;
+                                    }
+                                    
+                                    const unitId = `sobha_${project.replace(/\s+/g, '_')}_${unitNo}_${Date.now()}_${i}`.replace(/[^a-zA-Z0-9_]/g, '');
+                                    
+                                    if (project && unitNo) {
+                                        results.push({
+                                            unitId,
+                                            project: project || 'Sobha Properties',
+                                            subProject: '',
+                                            unitType: unitType || '',
+                                            floor: floor || '',
+                                            unitNo: unitNo,
+                                            totalUnitArea: area || '',
+                                            startingPrice: price || '',
+                                            availability: 'available',
+                                            sourceUrl: window.location.href,
+                                            extractionMethod: `Lightning-${selector}`,
+                                            rawData: text.substring(0, 200),
+                                            scrapedAt: new Date().toISOString()
+                                        });
+                                    }
                                 }
                             }
-                        } catch (rowError) {
-                            console.warn(`Error processing row ${i}:`, rowError);
+                            
+                            if (results.length > 0) {
+                                console.log(`Successfully extracted ${results.length} properties using ${selector}`);
+                                break; // Stop trying other selectors if we found data
+                            }
                         }
                     }
                     
                     return results;
                 }, this.input.maxResults);
 
-                this.logger.info('Table extraction completed', { propertiesFound: extractedData.length });
+                this.logger.info('Salesforce Lightning extraction completed', { propertiesFound: extractedData.length });
 
-            } catch (tableError) {
-                this.logger.warn('Table extraction failed, trying alternative methods', { error: tableError.message });
+            } catch (lightningError) {
+                this.logger.warn('Lightning extraction failed', { error: lightningError.message });
+            }
 
-                // Approach 2: Generic data extraction - look for any structured content
+            // Approach 2: Traditional table extraction
+            if (extractedData.length === 0) {
+                try {
+                    this.logger.info('Trying traditional table extraction');
+                    await page.waitForSelector('table tbody tr, .table tbody tr, [role="row"]:not(:first-child)', { timeout: 10000 });
+                    
+                    extractedData = await page.evaluate((maxResults) => {
+                        const rows = document.querySelectorAll('table tbody tr, .table tbody tr, [role="row"]:not(:first-child)');
+                        const results = [];
+                        
+                        for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
+                            try {
+                                const row = rows[i];
+                                const cells = row.querySelectorAll('td, [role="cell"]');
+                                
+                                if (cells.length >= 7) {
+                                    const project = cells[0]?.textContent?.trim() || '';
+                                    const subProject = cells[1]?.textContent?.trim() || '';
+                                    const unitType = cells[2]?.textContent?.trim() || '';
+                                    const floor = cells[3]?.textContent?.trim() || '';
+                                    const unitNo = cells[4]?.textContent?.trim() || '';
+                                    const totalUnitArea = cells[5]?.textContent?.trim() || '';
+                                    const startingPrice = cells[6]?.textContent?.trim() || '';
+                                    
+                                    const unitId = `${project}_${unitNo}_${Date.now()}_${i}`.replace(/[^a-zA-Z0-9_]/g, '');
+                                    
+                                    if (project && unitNo && startingPrice) {
+                                        results.push({
+                                            unitId,
+                                            project,
+                                            subProject,
+                                            unitType,
+                                            floor,
+                                            unitNo,
+                                            totalUnitArea,
+                                            startingPrice,
+                                            availability: 'available',
+                                            sourceUrl: window.location.href,
+                                            extractionMethod: 'Traditional-Table',
+                                            scrapedAt: new Date().toISOString()
+                                        });
+                                    }
+                                }
+                            } catch (rowError) {
+                                console.warn(`Error processing row ${i}:`, rowError);
+                            }
+                        }
+                        
+                        return results;
+                    }, this.input.maxResults);
+
+                    this.logger.info('Table extraction completed', { propertiesFound: extractedData.length });
+
+                } catch (tableError) {
+                    this.logger.warn('Table extraction failed, trying alternative methods', { error: tableError.message });
+                }
+            }
+
+            // Approach 3: Generic content extraction with better filtering
+            if (extractedData.length === 0) {
                 extractedData = await page.evaluate((maxResults) => {
                     const results = [];
                     
                     // Look for any elements that might contain property data
                     const dataElements = document.querySelectorAll(
-                        '.property, .unit, .listing, [class*="property"], [class*="unit"], [class*="listing"]'
+                        '.property, .unit, .listing, [class*="property"], [class*="unit"], [class*="listing"], ' +
+                        '.slds-card, .card, [data-name*="property"], [data-name*="unit"]'
                     );
                     
                     for (let i = 0; i < Math.min(dataElements.length, maxResults); i++) {
@@ -899,8 +1088,17 @@ class EnterpriseSobhaPortalScraper {
                             const element = dataElements[i];
                             const text = element.textContent?.trim() || '';
                             
-                            // Simple property data extraction based on common patterns
-                            if (text.length > 50) { // Has substantial content
+                            // Better filtering - avoid navigation and menu elements
+                            if (text.length > 50 && 
+                                !text.includes('Dashboard') && 
+                                !text.includes('Profile') && 
+                                !text.includes('About') &&
+                                !text.includes('Marketing') &&
+                                !text.includes('Performance') &&
+                                !text.includes('More') &&
+                                (text.includes('Sobha') || text.includes('Project') || text.includes('Unit') || 
+                                 text.includes('AED') || text.includes('sqft') || text.match(/\d+/))) {
+                                
                                 const unitId = `property_${i}_${Date.now()}`;
                                 results.push({
                                     unitId,
@@ -912,8 +1110,9 @@ class EnterpriseSobhaPortalScraper {
                                     totalUnitArea: '',
                                     startingPrice: '',
                                     availability: 'available',
-                                    rawData: text.substring(0, 500), // Store raw text for analysis
+                                    rawData: text.substring(0, 500),
                                     sourceUrl: window.location.href,
+                                    extractionMethod: 'Generic-Content',
                                     scrapedAt: new Date().toISOString()
                                 });
                             }
@@ -928,26 +1127,45 @@ class EnterpriseSobhaPortalScraper {
                 this.logger.info('Alternative extraction completed', { propertiesFound: extractedData.length });
             }
 
-            // If still no data, create a sample entry for debugging
+            // If still no data, create a detailed debug entry
             if (extractedData.length === 0) {
-                this.logger.warn('No property data found, creating debug entry');
+                this.logger.warn('No property data found, creating debug entry with page analysis');
                 
-                const currentUrl = page.url();
-                const pageTitle = await page.title();
+                const pageAnalysis = await page.evaluate(() => {
+                    const analysis = {
+                        url: window.location.href,
+                        title: document.title,
+                        bodyText: document.body.textContent?.substring(0, 1000) || '',
+                        elementCounts: {
+                            divs: document.querySelectorAll('div').length,
+                            tables: document.querySelectorAll('table').length,
+                            cards: document.querySelectorAll('.card, .slds-card').length,
+                            buttons: document.querySelectorAll('button').length,
+                            links: document.querySelectorAll('a').length
+                        },
+                        classNames: Array.from(document.querySelectorAll('[class]')).slice(0, 10).map(el => el.className)
+                    };
+                    return analysis;
+                });
                 
                 extractedData = [{
                     unitId: `debug_${Date.now()}`,
-                    project: 'Debug Entry',
-                    subProject: 'No data found',
+                    project: 'Debug Entry - No Properties Found',
+                    subProject: 'Analysis',
                     unitType: 'Debug',
                     floor: '0',
                     unitNo: 'DEBUG-001',
                     totalUnitArea: '0',
                     startingPrice: '0',
                     availability: 'debug',
-                    sourceUrl: currentUrl,
-                    pageTitle: pageTitle,
-                    debugInfo: 'No property data found on page',
+                    sourceUrl: pageAnalysis.url,
+                    pageTitle: pageAnalysis.title,
+                    debugInfo: {
+                        message: 'No property data found on page',
+                        pageAnalysis: pageAnalysis,
+                        pageStructure: pageStructure
+                    },
+                    extractionMethod: 'Debug-Analysis',
                     scrapedAt: new Date().toISOString()
                 }];
             }
@@ -962,7 +1180,8 @@ class EnterpriseSobhaPortalScraper {
             this.logger.info('Property data extraction completed', {
                 totalExtracted: extractedData.length,
                 validProperties: validProperties.length,
-                invalidFiltered: extractedData.length - validProperties.length
+                invalidFiltered: extractedData.length - validProperties.length,
+                extractionMethods: [...new Set(extractedData.map(p => p.extractionMethod))]
             });
 
             return validProperties;
@@ -983,6 +1202,7 @@ class EnterpriseSobhaPortalScraper {
                 availability: 'error',
                 sourceUrl: page.url(),
                 errorInfo: error.message,
+                extractionMethod: 'Error-Fallback',
                 scrapedAt: new Date().toISOString()
             }];
         }
