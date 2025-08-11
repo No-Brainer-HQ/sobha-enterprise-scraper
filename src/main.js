@@ -442,11 +442,11 @@ class EnterpriseSobhaPortalScraper {
                     this.logger.info(`Waiting ${CONFIG.CONTENT_WAIT}ms for page content to render`);
                     await page.waitForTimeout(CONFIG.CONTENT_WAIT);
 
-                    // Try to dismiss any modal (best effort)
+                    // Try to dismiss any modal (enhanced for promotional modal)
                     await this.dismissPostLoginModal(page);
                     
-                    // Additional wait for stability
-                    await page.waitForTimeout(3000);
+                    // Extended wait for modal dismissal to complete
+                    await page.waitForTimeout(5000);
 
                     // Validate authentication success
                     if (currentUrl !== CONFIG.LOGIN_URL) {
@@ -504,54 +504,156 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Modal dismissal (best effort)
+     * ENHANCED: Modal dismissal targeting promotional modal specifically
      */
     async dismissPostLoginModal(page) {
         try {
-            this.logger.info('Attempting to dismiss any post-login modals (best effort)');
+            this.logger.info('Attempting to dismiss post-login promotional modal');
 
-            // Wait briefly for any modals to appear
-            await page.waitForTimeout(2000);
+            // Wait for promotional modal to appear
+            await page.waitForTimeout(3000);
 
-            // Try common modal close methods
-            const modalSelectors = [
-                '.slds-modal button[data-key="close"]',
-                '.slds-modal button[title*="Close"]',
-                '.slds-modal button[aria-label*="close"]',
-                '.slds-modal .slds-modal__close',
+            // STEP 1: Target the specific promotional modal (6% commission modal)
+            this.logger.info('Looking for promotional modal (6% commission)');
+            
+            // Enhanced promotional modal selectors
+            const promotionalModalSelectors = [
+                // Target the X close button specifically
+                'button:has-text("×")',
+                '[role="dialog"] button:has-text("×")',
                 '.slds-modal button:has-text("×")',
-                '.slds-modal header button'
+                
+                // Target close buttons in modal header
+                '[role="dialog"] header button',
+                '.slds-modal__header button',
+                '.slds-modal header button',
+                
+                // Generic close button approaches
+                'button[aria-label*="close"]',
+                'button[aria-label*="Close"]',
+                'button[title*="close"]',
+                'button[title*="Close"]',
+                
+                // Target modal close by classes
+                '.slds-modal__close',
+                '.slds-button_icon-inverse',
+                '[data-key="close"]'
             ];
 
-            for (const selector of modalSelectors) {
+            let modalClosed = false;
+            
+            for (const selector of promotionalModalSelectors) {
                 try {
-                    const button = page.locator(selector).first();
-                    const isVisible = await button.isVisible().catch(() => false);
+                    this.logger.debug(`Trying promotional modal selector: ${selector}`);
                     
-                    if (isVisible) {
-                        this.logger.info(`Found modal close button: ${selector}`);
-                        await button.click({ timeout: 3000 });
-                        await page.waitForTimeout(1000);
-                        this.logger.info('✅ Modal closed successfully');
+                    await page.waitForSelector(selector, { timeout: 3000, state: 'visible' });
+                    this.logger.info(`Found promotional modal close button: ${selector}`);
+                    
+                    await page.click(selector);
+                    await page.waitForTimeout(2000);
+                    
+                    // Verify modal is closed by checking if button is still visible
+                    const stillVisible = await page.isVisible(selector).catch(() => false);
+                    if (!stillVisible) {
+                        this.logger.info('✅ Promotional modal closed successfully');
+                        modalClosed = true;
                         break;
                     }
+                    
                 } catch (error) {
-                    // Silently continue to next selector
+                    this.logger.debug(`Promotional modal selector failed: ${selector}`, { error: error.message });
                 }
             }
 
-            // Try escape key as fallback
-            try {
-                await page.keyboard.press('Escape');
-                await page.waitForTimeout(1000);
-            } catch (error) {
-                // Don't worry if this fails
+            // STEP 2: If promotional modal selectors didn't work, try JavaScript approach
+            if (!modalClosed) {
+                this.logger.info('Trying JavaScript approach to close promotional modal');
+                
+                try {
+                    const modalClosedByJS = await page.evaluate(() => {
+                        console.log('Looking for promotional modal via JavaScript...');
+                        
+                        // Look for modal containers
+                        const modals = document.querySelectorAll('[role="dialog"], .slds-modal');
+                        console.log(`Found ${modals.length} modal containers`);
+                        
+                        for (const modal of modals) {
+                            // Look for close buttons within each modal
+                            const closeButtons = modal.querySelectorAll('button');
+                            console.log(`Modal has ${closeButtons.length} buttons`);
+                            
+                            for (const button of closeButtons) {
+                                const text = button.textContent || button.innerHTML || '';
+                                const ariaLabel = button.getAttribute('aria-label') || '';
+                                const title = button.getAttribute('title') || '';
+                                
+                                // Check if it's a close button
+                                if (text.includes('×') || 
+                                    ariaLabel.toLowerCase().includes('close') || 
+                                    title.toLowerCase().includes('close') ||
+                                    button.classList.contains('slds-modal__close')) {
+                                    
+                                    console.log(`Found close button: ${text || ariaLabel || title}`);
+                                    button.click();
+                                    return true;
+                                }
+                            }
+                        }
+                        
+                        console.log('No close button found via JavaScript');
+                        return false;
+                    });
+                    
+                    if (modalClosedByJS) {
+                        this.logger.info('✅ Promotional modal closed via JavaScript');
+                        modalClosed = true;
+                        await page.waitForTimeout(2000);
+                    }
+                } catch (jsError) {
+                    this.logger.debug('JavaScript modal close failed', { error: jsError.message });
+                }
             }
 
-            this.logger.info('Modal dismissal completed (best effort)');
+            // STEP 3: Force close with escape key and click outside
+            if (!modalClosed) {
+                this.logger.info('Trying escape key and backdrop click to close modal');
+                
+                try {
+                    // Multiple escape presses
+                    await page.keyboard.press('Escape');
+                    await page.waitForTimeout(500);
+                    await page.keyboard.press('Escape');
+                    await page.waitForTimeout(500);
+                    
+                    // Click on backdrop/outside area
+                    await page.click('body', { position: { x: 10, y: 10 } });
+                    await page.waitForTimeout(1000);
+                    
+                    this.logger.info('Escape key and backdrop click completed');
+                } catch (escapeError) {
+                    this.logger.debug('Escape key approach failed', { error: escapeError.message });
+                }
+            }
+
+            // STEP 4: Verify modal dismissal worked
+            await page.waitForTimeout(2000);
+            
+            const finalModalCount = await page.evaluate(() => {
+                const visibleModals = Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
+                    .filter(modal => modal.offsetParent !== null);
+                return visibleModals.length;
+            });
+            
+            if (finalModalCount === 0) {
+                this.logger.info('✅ All modals successfully dismissed');
+            } else {
+                this.logger.warn(`${finalModalCount} modal(s) still visible after dismissal attempts`);
+            }
+
+            this.logger.info('Enhanced modal dismissal completed');
 
         } catch (error) {
-            this.logger.info('Modal dismissal skipped', { error: error.message });
+            this.logger.warn('Modal dismissal failed but continuing', { error: error.message });
         }
     }
 
@@ -687,8 +789,8 @@ class EnterpriseSobhaPortalScraper {
             // Wait for Lightning components to be fully interactive
             await page.waitForTimeout(3000);
 
-            // DEBUGGING: Analyze what's actually on the page AFTER Lightning rendering
-            this.logger.info('Analyzing page content after Lightning rendering');
+            // DEBUGGING: Analyze what's actually on the page AFTER modal dismissal and Lightning rendering
+            this.logger.info('Analyzing page content after modal dismissal and Lightning rendering');
             const pageAnalysis = await page.evaluate(() => {
                 const buttons = Array.from(document.querySelectorAll('button'));
                 const inputs = Array.from(document.querySelectorAll('input'));
@@ -710,6 +812,16 @@ class EnterpriseSobhaPortalScraper {
                     pageText: document.body.textContent?.includes('Filter') ? 'Contains Filter text' : 'No Filter text found',
                     pageTitle: document.title,
                     currentUrl: window.location.href,
+                    
+                    // Check for remaining modals
+                    visibleModals: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
+                        .filter(modal => modal.offsetParent !== null).length,
+                    modalInfo: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
+                        .filter(modal => modal.offsetParent !== null)
+                        .map(modal => ({
+                            className: modal.className,
+                            textContent: (modal.textContent || '').substring(0, 100)
+                        })),
                     
                     // Sample of actual button elements for debugging
                     buttonSample: buttons.slice(0, 5).map(btn => ({
