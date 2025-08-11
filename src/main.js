@@ -35,35 +35,13 @@ const CONFIG = {
     // Portal endpoints
     LOGIN_URL: 'https://www.sobhapartnerportal.com/partnerportal/s/',
     
-    // Selectors (production-ready with enhanced login button detection)
+    // Selectors (Sobha Portal Specific - based on actual inspection)
     SELECTORS: {
-        email: 'input[type="email"], input[placeholder*="email"], input[name*="email"], input[id*="email"]',
-        password: 'input[type="password"], input[placeholder*="password"], input[name*="password"], input[id*="password"]',
-        loginButton: [
-            // Try multiple button selector patterns
-            'button[type="submit"]',
-            'input[type="submit"]',
-            'button:has-text("Sign in")',
-            'button:has-text("Login")', 
-            'button:has-text("Log in")',
-            'button:has-text("Enter")',
-            'button:has-text("Submit")',
-            '.btn:has-text("Sign in")',
-            '.btn:has-text("Login")',
-            '.login-btn',
-            '.submit-btn',
-            '[data-cy="login"]',
-            '[data-testid="login"]',
-            'button[class*="login"]',
-            'button[class*="submit"]',
-            'form button',
-            'form input[type="submit"]',
-            '[role="button"]:has-text("Sign")',
-            '[role="button"]:has-text("Login")',
-            'a[href*="login"]'
-        ],
-        dashboardIndicator: 'text=BARACA LIFE CAPITAL REAL ESTATE, text=Dashboard, text=My Dashboard',
-        projectsNavigation: 'text=Sobha Projects',
+        email: 'input[placeholder="name@example.com"], input[type="email"], textbox, input[name*="email"]',
+        password: 'input[type="password"], textbox:has-text("Password"), input[placeholder*="password"]',
+        loginButton: 'button:has-text("Sign in")',
+        dashboardIndicator: 'text=BARACA LIFE CAPITAL REAL ESTATE, text=Dashboard, text=My Dashboard, text=Sobha Projects',
+        projectsNavigation: 'text=Sobha Projects, a:has-text("Sobha Projects"), button:has-text("Sobha Projects")',
         filterBed: 'text=Select Bed',
         filterArea: 'text=Select Area (SQ. FT.)',
         filterPrice: 'text=Select Price (AED)',
@@ -307,8 +285,7 @@ class InputValidator {
             retryAttempts: input.retryAttempts || 3,
             enableStealth: input.enableStealth !== false,
             downloadDocuments: input.downloadDocuments || false,
-            parallelRequests: input.parallelRequests || 3,
-            debugMode: input.debugMode || false // New debug option
+            parallelRequests: input.parallelRequests || 3
         };
     }
 }
@@ -478,13 +455,13 @@ class EnterpriseSobhaPortalScraper {
                 // Apply stealth techniques
                 await this.applyStealthTechniques(page);
 
-                // Wait for login form elements with enhanced detection
-                this.logger.info('Waiting for login form elements');
+                // Wait for login form elements with Sobha portal specific selectors
+                this.logger.info('Waiting for Sobha portal login form elements');
                 
                 await page.waitForSelector(CONFIG.SELECTORS.email, { timeout: 20000 });
                 await page.waitForSelector(CONFIG.SELECTORS.password, { timeout: 20000 });
 
-                this.logger.info('Login form elements found, filling credentials');
+                this.logger.info('Sobha portal form elements found, filling credentials');
 
                 // Clear and fill email field with human-like typing
                 await page.fill(CONFIG.SELECTORS.email, '');
@@ -497,16 +474,12 @@ class EnterpriseSobhaPortalScraper {
                 // Add realistic human delay
                 await page.waitForTimeout(1000 + Math.random() * 2000);
 
-                // Find and click login button with enhanced detection
-                this.logger.info('Searching for login button');
-                const loginButtonSelector = await this.findLoginButton(page);
+                // Wait for login button and click it
+                this.logger.info('Waiting for Sobha portal "Sign in" button');
+                await page.waitForSelector(CONFIG.SELECTORS.loginButton, { timeout: 10000 });
                 
-                if (!loginButtonSelector) {
-                    throw new Error('Login button not found on page. Check page structure or selectors.');
-                }
-
-                this.logger.info(`Clicking login button with selector: ${loginButtonSelector}`);
-                await page.click(loginButtonSelector);
+                this.logger.info('Clicking "Sign in" button');
+                await page.click(CONFIG.SELECTORS.loginButton);
 
                 // Wait for successful login with multiple success indicators
                 try {
@@ -724,11 +697,11 @@ class EnterpriseSobhaPortalScraper {
     async executeScraping() {
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs: 120, // Increased timeout for debugging
+            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000,
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
-                    headless: this.input.enableStealth !== false, // Allow non-headless for debugging
+                    headless: true,
                     args: [
                         '--disable-gpu',
                         '--no-sandbox',
@@ -839,31 +812,14 @@ class EnterpriseSobhaPortalScraper {
                         stack: error.stack
                     });
                     
-                    // Take debug screenshot on failure
-                    try {
-                        await page.screenshot({ 
-                            path: `error-screenshot-${Date.now()}.png`, 
-                            fullPage: true 
-                        });
-                        this.logger.info('Debug screenshot saved for error analysis');
-                    } catch (screenshotError) {
-                        this.logger.warn('Could not save debug screenshot:', { error: screenshotError.message });
-                    }
-                    
-                    // Store error results for debugging with enhanced info
+                    // Store error results for debugging
                     await Dataset.pushData({
                         sessionId: this.sessionId,
                         timestamp: new Date().toISOString(),
                         success: false,
                         error: {
                             message: error.message,
-                            stack: error.stack,
-                            type: error.constructor.name
-                        },
-                        debugInfo: {
-                            url: page.url(),
-                            title: await page.title().catch(() => 'Unknown'),
-                            userAgent: await page.evaluate(() => navigator.userAgent).catch(() => 'Unknown')
+                            stack: error.stack
                         },
                         metrics: this.metrics.getSummary()
                     });
