@@ -576,58 +576,72 @@ class EnterpriseSobhaPortalScraper {
                     const modalClosedByJS = await page.evaluate(() => {
                         console.log('Looking for promotional modal via JavaScript...');
                         
-                        // First, look for the specific Lightning component modal
-                        const lightningComponentModal = document.querySelector('[c-brokerportalhomepage_brokerportalhomepage]');
-                        if (lightningComponentModal) {
-                            console.log('Found Lightning component modal');
+                        // First, look for the specific Lightning filter component
+                        const lightningFilterComponent = document.querySelector('[c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]');
+                        if (lightningFilterComponent) {
+                            console.log('Found Lightning filter component');
                             
-                            // Look for close buttons within the Lightning component
-                            const closeButtons = lightningComponentModal.querySelectorAll('button');
-                            console.log(`Lightning component has ${closeButtons.length} buttons`);
+                            // Look for clickable elements within the Lightning filter component
+                            const clickables = lightningFilterComponent.querySelectorAll('button, a, [role="button"]');
+                            console.log(`Lightning filter component has ${clickables.length} clickable elements`);
                             
-                            for (const button of closeButtons) {
-                                const text = button.textContent || button.innerHTML || '';
-                                const ariaLabel = button.getAttribute('aria-label') || '';
-                                const title = button.getAttribute('title') || '';
-                                const className = button.className || '';
+                            for (const element of clickables) {
+                                const text = element.textContent || element.innerHTML || '';
+                                const dataElement = element.getAttribute('data-element') || '';
+                                const className = element.className || '';
                                 
-                                // Check if it's a close button
-                                if (text.includes('×') || 
-                                    ariaLabel.toLowerCase().includes('close') || 
-                                    title.toLowerCase().includes('close') ||
-                                    className.includes('slds-modal__close') ||
-                                    className.includes('slds-button_icon')) {
+                                // Check if it's the filter button
+                                if (text.toLowerCase().includes('filter') || 
+                                    text.toLowerCase().includes('properties') ||
+                                    dataElement === 'general-enquiry' ||
+                                    className.includes('btn')) {
                                     
-                                    console.log(`Found Lightning component close button: ${text || ariaLabel || title || 'icon button'}`);
-                                    button.click();
+                                    console.log(`Found Lightning filter element: ${text || dataElement || 'btn element'}`);
+                                    element.click();
                                     return true;
                                 }
                             }
                         }
                         
-                        // Fallback: Look for modal containers generally
-                        const modals = document.querySelectorAll('[role="dialog"], .slds-modal');
-                        console.log(`Found ${modals.length} modal containers`);
+                        // Fallback: Look for all clickable elements (including <a> tags)
+                        console.log('Looking for clickable elements including <a> tags...');
+                        const allElements = Array.from(document.querySelectorAll(
+                            'button, a, input[type="button"], input[type="submit"], [role="button"], [onclick], lightning-button'
+                        ));
                         
-                        for (const modal of modals) {
-                            // Look for close buttons within each modal
-                            const closeButtons = modal.querySelectorAll('button');
-                            console.log(`Modal has ${closeButtons.length} buttons`);
+                        console.log(`Found ${allElements.length} potentially clickable elements`);
+                        
+                        for (const element of allElements) {
+                            const text = (element.textContent || element.value || '').toLowerCase();
+                            const ariaLabel = (element.getAttribute('aria-label') || '').toLowerCase();
+                            const className = (element.className || '').toLowerCase();
+                            const id = (element.id || '').toLowerCase();
+                            const dataElement = (element.getAttribute('data-element') || '').toLowerCase();
+                            const tagName = element.tagName.toLowerCase();
                             
-                            for (const button of closeButtons) {
-                                const text = button.textContent || button.innerHTML || '';
-                                const ariaLabel = button.getAttribute('aria-label') || '';
-                                const title = button.getAttribute('title') || '';
+                            // Look for filter-related keywords with <a> tag priority
+                            const searchTerms = ['filter', 'search', 'apply', 'properties', 'submit'];
+                            const hasFilterKeyword = searchTerms.some(term => 
+                                text.includes(term) || ariaLabel.includes(term) || className.includes(term) || id.includes(term)
+                            );
+                            
+                            // Special check for the exact element from HTML inspection
+                            const isFilterPropertiesLink = (
+                                tagName === 'a' && 
+                                text.includes('filter') && 
+                                text.includes('properties') &&
+                                (className.includes('btn') || dataElement === 'general-enquiry')
+                            );
+                            
+                            if ((hasFilterKeyword || isFilterPropertiesLink) && element.offsetParent !== null) { // Visible element
+                                console.log(`Found potential filter element: "${text || ariaLabel || className}" - Tag: ${tagName} - attempting click`);
                                 
-                                // Check if it's a close button
-                                if (text.includes('×') || 
-                                    ariaLabel.toLowerCase().includes('close') || 
-                                    title.toLowerCase().includes('close') ||
-                                    button.classList.contains('slds-modal__close')) {
-                                    
-                                    console.log(`Found close button: ${text || ariaLabel || title}`);
-                                    button.click();
+                                try {
+                                    element.click();
+                                    console.log('Element clicked successfully');
                                     return true;
+                                } catch (clickError) {
+                                    console.log(`Click failed: ${clickError}`);
                                 }
                             }
                         }
@@ -830,20 +844,25 @@ class EnterpriseSobhaPortalScraper {
             this.logger.info('Analyzing page content after modal dismissal and Lightning rendering');
             const pageAnalysis = await page.evaluate(() => {
                 const buttons = Array.from(document.querySelectorAll('button'));
+                const links = Array.from(document.querySelectorAll('a'));
                 const inputs = Array.from(document.querySelectorAll('input'));
-                const allClickables = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [onclick], [role="button"]'));
+                const allClickables = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [onclick], [role="button"], a, a.btn'));
                 
                 // Look specifically for Lightning component content
                 const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
+                const sobhaFilterComponent = document.querySelector('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter, [c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]');
                 const lightningElements = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
                 
                 return {
                     totalButtons: buttons.length,
+                    totalLinks: links.length,
                     totalInputs: inputs.length,
                     totalClickables: allClickables.length,
                     hasSobhaComponent: !!sobhaComponent,
+                    hasSobhaFilterComponent: !!sobhaFilterComponent,
                     lightningElementCount: lightningElements.length,
                     buttonTexts: buttons.map(btn => btn.textContent?.trim()).filter(text => text && text.length > 0),
+                    linkTexts: links.map(link => link.textContent?.trim()).filter(text => text && text.length > 0),
                     inputValues: inputs.map(inp => inp.value?.trim() || inp.placeholder?.trim()).filter(text => text && text.length > 0),
                     clickableTexts: allClickables.map(el => el.textContent?.trim() || el.value?.trim() || el.getAttribute('aria-label')).filter(text => text && text.length > 0),
                     pageText: document.body.textContent?.includes('Filter') ? 'Contains Filter text' : 'No Filter text found',
@@ -861,14 +880,23 @@ class EnterpriseSobhaPortalScraper {
                             textContent: (modal.textContent || '').substring(0, 100)
                         })),
                     
-                    // Sample of actual button elements for debugging
-                    buttonSample: buttons.slice(0, 5).map(btn => ({
+                    // Sample of actual elements for debugging
+                    buttonSample: buttons.slice(0, 3).map(btn => ({
                         text: btn.textContent?.trim(),
                         value: btn.value,
                         className: btn.className,
                         id: btn.id,
                         type: btn.type,
                         visible: btn.offsetParent !== null
+                    })),
+                    linkSample: links.slice(0, 5).map(link => ({
+                        text: link.textContent?.trim(),
+                        className: link.className,
+                        id: link.id,
+                        href: link.href,
+                        dataElement: link.getAttribute('data-element'),
+                        lightningComponent: link.getAttribute('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter') ? 'Filter-Component' : null,
+                        visible: link.offsetParent !== null
                     }))
                 };
             });
@@ -879,32 +907,40 @@ class EnterpriseSobhaPortalScraper {
             this.logger.info('Looking for Filter Properties button with Lightning awareness');
             
             try {
-                // Enhanced selector targeting Lightning-rendered content
+                // Enhanced selector targeting Lightning-rendered content (FIXED: target <a> tags)
                 const lightningFilterSelectors = [
-                    // Standard button text
-                    'button:has-text("Filter Properties")',
+                    // Target the exact Lightning component from HTML inspection
+                    'a[c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]:has-text("Filter Properties")',
+                    'a[data-element="general-enquiry"]:has-text("Filter Properties")',
+                    'a.btn.mt-4:has-text("Filter Properties")',
                     
-                    // Lightning-specific button selectors
+                    // Standard <a> tag text selectors
+                    'a:has-text("Filter Properties")',
+                    'a:has-text("Filter")',
+                    
+                    // Lightning-specific <a> tag selectors  
                     'lightning-button:has-text("Filter Properties")',
                     'lightning-button:has-text("Filter")',
                     
-                    // Aura component buttons
+                    // Aura component <a> tags
                     '[data-aura-class*="button"]:has-text("Filter")',
                     
-                    // SLDS (Salesforce Lightning Design System) buttons
+                    // SLDS (Salesforce Lightning Design System) <a> tags
                     '.slds-button:has-text("Filter")',
-                    '.slds-button:has-text("Properties")',
+                    '.btn:has-text("Filter Properties")',
+                    '.btn:has-text("Filter")',
                     
-                    // Generic Lightning buttons with filter text
+                    // Fallback to button tags (original selectors)
+                    'button:has-text("Filter Properties")',
                     'button:has-text("Filter")',
                     'button:has-text("Apply")',
                     'button:has-text("Search")',
                     
-                    // Try different case variations
-                    'button:has-text("FILTER PROPERTIES")',
-                    'button:has-text("filter properties")',
-                    'button:has-text("Apply Filter")',
-                    'button:has-text("Search Properties")'
+                    // Try different case variations for <a> tags
+                    'a:has-text("FILTER PROPERTIES")',
+                    'a:has-text("filter properties")',
+                    'a:has-text("Apply Filter")',
+                    'a:has-text("Search Properties")'
                 ];
 
                 let buttonFound = false;
@@ -958,9 +994,9 @@ class EnterpriseSobhaPortalScraper {
                     const filterButtonClicked = await page.evaluate(() => {
                         console.log('Starting comprehensive button search...');
                         
-                        // Get all potentially clickable elements
+                        // Get all potentially clickable elements (including <a> tags)
                         const allElements = Array.from(document.querySelectorAll(
-                            'button, input[type="button"], input[type="submit"], [role="button"], [onclick], lightning-button'
+                            'button, input[type="button"], input[type="submit"], [role="button"], [onclick], lightning-button, a, a.btn'
                         ));
                         
                         console.log(`Found ${allElements.length} potentially clickable elements`);
@@ -990,7 +1026,7 @@ class EnterpriseSobhaPortalScraper {
                             }
                         }
                         
-                        console.log('No suitable filter button found');
+                        console.log('No suitable filter button or link found');
                         return false;
                     });
                     
@@ -1011,7 +1047,7 @@ class EnterpriseSobhaPortalScraper {
                     this.logger.debug('JavaScript button detection failed', { error: jsError.message });
                 }
                 
-                throw new Error('Could not find or click Filter Properties button after comprehensive Lightning-aware search');
+                throw new Error('Could not find or click Filter Properties button/link after comprehensive Lightning-aware search');
             }
 
         } catch (error) {
