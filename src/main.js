@@ -18,10 +18,10 @@ import { performance } from 'perf_hooks';
  * Enterprise Configuration Constants
  */
 const CONFIG = {
-    // Performance settings - INCREASED TIMEOUTS
+    // Performance settings - INCREASED TIMEOUTS FOR MODAL HANDLING
     MAX_CONCURRENT_REQUESTS: 5,
-    REQUEST_TIMEOUT: 300000, // Increased to 5 minutes for modal handling
-    NAVIGATION_TIMEOUT: 60000, // Increased to 1 minute
+    REQUEST_TIMEOUT: 600000, // Increased to 10 minutes for complex modal handling
+    NAVIGATION_TIMEOUT: 120000, // Increased to 2 minutes
     
     // Security settings
     MAX_RETRY_ATTEMPTS: 3,
@@ -607,36 +607,100 @@ class EnterpriseSobhaPortalScraper {
                     }
                 }
 
-                // Method 3: Force remove modal with JavaScript
+                // Method 3: Nuclear JavaScript removal - target all possible blocking elements
                 if (!modalClosed) {
-                    this.logger.info('Trying to force remove modal with JavaScript');
+                    this.logger.info('Trying nuclear modal removal with comprehensive JavaScript');
                     try {
                         await page.evaluate(() => {
-                            // Remove all modal elements
-                            const modals = document.querySelectorAll('.slds-modal, [role="dialog"], .slds-backdrop');
-                            modals.forEach(modal => {
-                                if (modal && modal.parentNode) {
-                                    modal.parentNode.removeChild(modal);
+                            console.log('Starting nuclear modal removal...');
+                            
+                            // Remove all possible modal and blocking elements
+                            const selectors = [
+                                '.slds-modal',
+                                '[role="dialog"]',
+                                '.slds-backdrop',
+                                '.modal-backdrop',
+                                '[aria-modal="true"]',
+                                '[data-aura-rendered-by]',
+                                '.cCenterPanel',
+                                'section[role="dialog"]',
+                                '[c-brokerportalhomepage_brokerportalhomepage]'
+                            ];
+                            
+                            let removedCount = 0;
+                            selectors.forEach(selector => {
+                                const elements = document.querySelectorAll(selector);
+                                elements.forEach(element => {
+                                    if (element && element.parentNode) {
+                                        console.log(`Removing element: ${selector}`);
+                                        element.parentNode.removeChild(element);
+                                        removedCount++;
+                                    }
+                                });
+                            });
+                            
+                            // Also try to remove by checking for specific class patterns
+                            const allElements = document.querySelectorAll('*');
+                            allElements.forEach(element => {
+                                const className = element.className;
+                                if (typeof className === 'string' && 
+                                    (className.includes('slds-modal') || 
+                                     className.includes('modal') ||
+                                     className.includes('backdrop') ||
+                                     element.getAttribute('role') === 'dialog')) {
+                                    if (element.parentNode) {
+                                        console.log(`Removing modal-like element: ${className}`);
+                                        element.parentNode.removeChild(element);
+                                        removedCount++;
+                                    }
                                 }
                             });
                             
-                            // Remove backdrop
-                            const backdrops = document.querySelectorAll('.slds-backdrop, .modal-backdrop');
-                            backdrops.forEach(backdrop => {
-                                if (backdrop && backdrop.parentNode) {
-                                    backdrop.parentNode.removeChild(backdrop);
-                                }
-                            });
-                            
-                            // Re-enable pointer events on body
+                            // Force reset body styles
                             document.body.style.pointerEvents = 'auto';
                             document.body.style.overflow = 'auto';
+                            document.body.style.position = 'static';
+                            document.documentElement.style.pointerEvents = 'auto';
+                            document.documentElement.style.overflow = 'auto';
+                            
+                            // Remove any CSS that might be blocking interactions
+                            const styleSheets = document.styleSheets;
+                            for (let i = 0; i < styleSheets.length; i++) {
+                                try {
+                                    const sheet = styleSheets[i];
+                                    if (sheet.cssRules) {
+                                        for (let j = sheet.cssRules.length - 1; j >= 0; j--) {
+                                            const rule = sheet.cssRules[j];
+                                            if (rule.selectorText && 
+                                                (rule.selectorText.includes('.slds-modal') ||
+                                                 rule.selectorText.includes('.slds-backdrop'))) {
+                                                sheet.deleteRule(j);
+                                            }
+                                        }
+                                    }
+                                } catch (cssError) {
+                                    // Ignore cross-origin CSS errors
+                                }
+                            }
+                            
+                            console.log(`Nuclear removal completed. Removed ${removedCount} elements.`);
+                            return removedCount;
                         });
                         
-                        this.logger.info('✅ Modal force-removed with JavaScript');
-                        modalClosed = true;
+                        // Wait for any Salesforce Lightning to finish processing
+                        await page.waitForTimeout(3000);
+                        
+                        // Verify modal is really gone
+                        const stillExists = await page.locator('.slds-modal.slds-fade-in-open').count();
+                        if (stillExists === 0) {
+                            this.logger.info('✅ Nuclear modal removal successful');
+                            modalClosed = true;
+                        } else {
+                            this.logger.info(`⚠️ ${stillExists} modals still exist after nuclear removal`);
+                        }
+                        
                     } catch (jsError) {
-                        this.logger.debug('JavaScript modal removal failed');
+                        this.logger.debug('Nuclear JavaScript modal removal failed', { error: jsError.message });
                     }
                 }
 
