@@ -567,11 +567,16 @@ class EnterpriseSobhaPortalScraper {
                     return true;
                     
                 } catch (waitError) {
-                    // Check for specific error messages
-                    const errorElements = await page.locator('text*="error", text*="invalid", text*="incorrect"').all();
-                    if (errorElements.length > 0) {
-                        const errorText = await errorElements[0].textContent();
-                        throw new Error(`Authentication failed: ${errorText}`);
+                    // Check for specific error messages with correct Playwright syntax
+                    try {
+                        const errorElements = await page.locator('text="error", text="invalid", text="incorrect", text="Error", text="Invalid", text="Incorrect"').all();
+                        if (errorElements.length > 0) {
+                            const errorText = await errorElements[0].textContent();
+                            throw new Error(`Authentication failed: ${errorText}`);
+                        }
+                    } catch (errorCheckError) {
+                        // If error checking fails, just proceed with original error
+                        this.logger.debug('Error message check failed:', { error: errorCheckError.message });
                     }
                     throw waitError;
                 }
