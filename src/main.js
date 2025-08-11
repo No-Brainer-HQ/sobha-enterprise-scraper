@@ -20,7 +20,7 @@ import { performance } from 'perf_hooks';
 const CONFIG = {
     // Performance settings - INCREASED TIMEOUTS
     MAX_CONCURRENT_REQUESTS: 5,
-    REQUEST_TIMEOUT: 120000, // Increased to 2 minutes
+    REQUEST_TIMEOUT: 300000, // Increased to 5 minutes for modal handling
     NAVIGATION_TIMEOUT: 60000, // Increased to 1 minute
     
     // Security settings
@@ -43,17 +43,6 @@ const CONFIG = {
         
         // FIXED: More flexible dashboard detection using URL + basic page elements
         dashboardIndicator: 'body', // Just check if page loads - we'll use URL detection
-        
-        // Navigation selectors - will be determined dynamically
-        projectsNavigation: [
-            'a:has-text("Sobha Projects")',
-            'button:has-text("Sobha Projects")', 
-            'text=Projects',
-            '[title*="Projects"]',
-            '[data-label*="Projects"]',
-            'a[href*="sobha"]',
-            'a[href*="project"]'
-        ],
         
         // Filter selectors
         filterBed: 'text=Select Bed',
@@ -460,6 +449,9 @@ class EnterpriseSobhaPortalScraper {
                         pageTitle 
                     });
 
+                    // CRITICAL FIX: Dismiss the promotional modal that appears after login
+                    await this.dismissPostLoginModal(page);
+
                     // If we've navigated away from the initial login URL, consider it successful
                     if (currentUrl !== CONFIG.LOGIN_URL) {
                         const requestDuration = performance.now() - requestStart;
@@ -516,11 +508,124 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
+     * CRITICAL FIX: Dismiss the promotional modal that appears after login
+     */
+    async dismissPostLoginModal(page) {
+        try {
+            this.logger.info('Checking for post-login promotional modal');
+
+            // Wait a moment for the modal to appear
+            await page.waitForTimeout(2000);
+
+            // Check if the modal exists
+            const modalExists = await page.locator('.slds-modal.slds-fade-in-open').count() > 0;
+            
+            if (modalExists) {
+                this.logger.info('Promotional modal detected, attempting to close it');
+
+                // Try multiple close button selectors for Salesforce Lightning modals
+                const closeSelectors = [
+                    'button[aria-label="Close"]',
+                    '.slds-modal__close',
+                    'button.slds-modal__close',
+                    '.slds-button.slds-modal__close',
+                    'button[title="Close"]',
+                    '.slds-modal .slds-button[aria-label="Close"]',
+                    '.slds-modal button:has-text("×")',
+                    '.slds-modal button:has-text("✕")',
+                    '.slds-modal [data-key="close"]',
+                    // Generic close button in modal
+                    '.slds-modal button[type="button"]'
+                ];
+
+                let modalClosed = false;
+                for (const selector of closeSelectors) {
+                    try {
+                        this.logger.debug(`Trying close button selector: ${selector}`);
+                        
+                        // Check if the close button exists and is visible
+                        const closeButton = page.locator(selector).first();
+                        const isVisible = await closeButton.isVisible().catch(() => false);
+                        
+                        if (isVisible) {
+                            this.logger.info(`Found close button with selector: ${selector}`);
+                            await closeButton.click();
+                            
+                            // Wait for modal to disappear
+                            await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
+                                state: 'detached', 
+                                timeout: 5000 
+                            });
+                            
+                            this.logger.info('✅ Modal successfully closed');
+                            modalClosed = true;
+                            break;
+                        }
+                    } catch (error) {
+                        this.logger.debug(`Close selector failed: ${selector}`, { error: error.message });
+                    }
+                }
+
+                // If normal close buttons don't work, try pressing Escape key
+                if (!modalClosed) {
+                    this.logger.info('Trying to close modal with Escape key');
+                    try {
+                        await page.keyboard.press('Escape');
+                        await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
+                            state: 'detached', 
+                            timeout: 3000 
+                        });
+                        this.logger.info('✅ Modal closed with Escape key');
+                        modalClosed = true;
+                    } catch (escapeError) {
+                        this.logger.debug('Escape key failed to close modal');
+                    }
+                }
+
+                // If still not closed, try clicking outside the modal
+                if (!modalClosed) {
+                    this.logger.info('Trying to close modal by clicking backdrop');
+                    try {
+                        // Click on the modal backdrop (outside the modal content)
+                        await page.locator('.slds-backdrop').click();
+                        await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
+                            state: 'detached', 
+                            timeout: 3000 
+                        });
+                        this.logger.info('✅ Modal closed by clicking backdrop');
+                        modalClosed = true;
+                    } catch (backdropError) {
+                        this.logger.debug('Backdrop click failed to close modal');
+                    }
+                }
+
+                if (!modalClosed) {
+                    this.logger.warn('Could not close promotional modal, proceeding anyway');
+                    // Continue execution even if modal couldn't be closed
+                }
+
+                // Wait a moment for any animations to complete
+                await page.waitForTimeout(1000);
+
+            } else {
+                this.logger.info('No promotional modal detected');
+            }
+
+        } catch (error) {
+            this.logger.warn('Error while dismissing post-login modal', { error: error.message });
+            // Continue execution even if modal dismissal fails
+        }
+    }
+
+    /**
      * IMPROVED: Navigate to Sobha Projects page with flexible selectors
      */
     async navigateToProjects(page) {
         try {
             this.logger.info('Navigating to Sobha Projects page');
+
+            // Wait a moment to ensure modal dismissal is complete
+            await page.waitForTimeout(2000);
 
             // First, analyze what's available on the current page
             const availableLinks = await page.evaluate(() => {
@@ -529,8 +634,9 @@ class EnterpriseSobhaPortalScraper {
                     text: link.textContent?.trim() || '',
                     href: link.href || '',
                     className: link.className || '',
-                    id: link.id || ''
-                })).filter(link => link.text || link.href);
+                    id: link.id || '',
+                    visible: link.offsetParent !== null && !link.hidden
+                })).filter(link => (link.text || link.href) && link.visible);
             });
 
             this.logger.info('Available navigation elements:', { 
@@ -538,52 +644,100 @@ class EnterpriseSobhaPortalScraper {
                 links: availableLinks.slice(0, 10) // Log first 10 for debugging
             });
 
+            // Enhanced navigation selectors based on the actual Sobha portal structure
+            const navigationSelectors = [
+                // Direct link to Sobha Projects page (from logs)
+                'a[href="/partnerportal/s/sobha-project"]',
+                'a[href*="sobha-project"]',
+                
+                // Text-based selectors
+                'a:has-text("Sobha Projects")',
+                'button:has-text("Sobha Projects")', 
+                'text=Projects',
+                '[title*="Projects"]',
+                '[data-label*="Projects"]',
+                
+                // Menu items
+                'a[role="menuitem"]:has-text("Sobha Projects")',
+                'a[role="menuitem"][href*="project"]',
+                
+                // Navigation links
+                'nav a:has-text("Sobha Projects")',
+                '.slds-nav a:has-text("Sobha Projects")',
+                
+                // Generic project links
+                'a[href*="sobha"]',
+                'a[href*="project"]'
+            ];
+
             // Try each navigation selector
             let navigated = false;
-            for (const selector of CONFIG.SELECTORS.projectsNavigation) {
+            for (const selector of navigationSelectors) {
                 try {
                     this.logger.debug(`Trying navigation selector: ${selector}`);
-                    await page.waitForSelector(selector, { timeout: 5000 });
-                    await page.click(selector);
-                    this.logger.info(`Successfully clicked navigation element: ${selector}`);
-                    navigated = true;
-                    break;
+                    
+                    // Wait for element to be present
+                    await page.waitForSelector(selector, { timeout: 3000 });
+                    
+                    // Check if element is visible and clickable
+                    const element = page.locator(selector).first();
+                    const isVisible = await element.isVisible();
+                    
+                    if (isVisible) {
+                        this.logger.info(`Found navigation element: ${selector}`);
+                        
+                        // Scroll into view if needed
+                        await element.scrollIntoViewIfNeeded();
+                        
+                        // Wait a moment and click
+                        await page.waitForTimeout(500);
+                        await element.click();
+                        
+                        // Wait for navigation to complete
+                        await page.waitForLoadState('domcontentloaded', { timeout: 10000 });
+                        
+                        this.logger.info(`Successfully navigated using: ${selector}`);
+                        navigated = true;
+                        break;
+                    }
                 } catch (selectorError) {
                     this.logger.debug(`Navigation selector failed: ${selector}`, { error: selectorError.message });
                 }
             }
 
             if (!navigated) {
-                // If no specific selector works, try to find any link containing "project" or "sobha"
-                const fallbackSelector = await page.evaluate(() => {
-                    const links = Array.from(document.querySelectorAll('a, button'));
-                    const projectLink = links.find(link => {
-                        const text = link.textContent?.toLowerCase() || '';
-                        const href = link.href?.toLowerCase() || '';
-                        return text.includes('project') || text.includes('sobha') || 
-                               href.includes('project') || href.includes('sobha');
+                // Fallback: Try to navigate directly to the projects URL
+                this.logger.info('Trying direct navigation to projects page');
+                try {
+                    const currentUrl = page.url();
+                    const baseUrl = currentUrl.split('/partnerportal')[0];
+                    const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
+                    
+                    this.logger.info(`Attempting direct navigation to: ${projectsUrl}`);
+                    await page.goto(projectsUrl, { 
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000 
                     });
-                    return projectLink ? projectLink.tagName + ':has-text("' + projectLink.textContent?.trim() + '")' : null;
-                });
-
-                if (fallbackSelector) {
-                    this.logger.info(`Using fallback selector: ${fallbackSelector}`);
-                    await page.click(fallbackSelector);
+                    
                     navigated = true;
+                    this.logger.info('Successfully navigated via direct URL');
+                } catch (directNavError) {
+                    this.logger.warn('Direct navigation failed', { error: directNavError.message });
                 }
             }
 
             if (navigated) {
-                // Wait for page to load
-                await page.waitForLoadState('domcontentloaded');
+                // Wait for page to load and check if we're on a projects page
+                await page.waitForTimeout(3000);
                 
-                // Try to detect if we're on a projects page
                 const currentUrl = page.url();
-                const hasFilterElements = await page.locator(CONFIG.SELECTORS.filterButton).count() > 0;
+                const pageContent = await page.evaluate(() => document.body.textContent?.toLowerCase() || '');
+                const hasProjectContent = pageContent.includes('project') || pageContent.includes('sobha');
                 
                 this.logger.info('Projects page navigation result', {
                     currentUrl: currentUrl.substring(0, 100),
-                    hasFilterElements
+                    hasProjectContent,
+                    pageContentLength: pageContent.length
                 });
 
                 return true;
@@ -840,7 +994,7 @@ class EnterpriseSobhaPortalScraper {
     async executeScraping() {
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000, // INCREASED timeout
+            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000, // 5 minutes for modal handling
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
