@@ -307,7 +307,8 @@ class InputValidator {
             retryAttempts: input.retryAttempts || 3,
             enableStealth: input.enableStealth !== false,
             downloadDocuments: input.downloadDocuments || false,
-            parallelRequests: input.parallelRequests || 3
+            parallelRequests: input.parallelRequests || 3,
+            debugMode: input.debugMode || false // New debug option
         };
     }
 }
@@ -332,8 +333,66 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Apply enterprise-grade stealth techniques
+     * Enhanced login button finder with comprehensive debugging
      */
+    async findLoginButton(page) {
+        this.logger.info('Searching for login button with enhanced detection');
+
+        // First, let's see what buttons are actually on the page
+        try {
+            const allButtons = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], [role="button"]'));
+                return buttons.map(btn => ({
+                    tagName: btn.tagName,
+                    type: btn.type || 'none',
+                    text: btn.textContent?.trim() || 'no text',
+                    className: btn.className || 'no class',
+                    id: btn.id || 'no id',
+                    outerHTML: btn.outerHTML.substring(0, 200) // First 200 chars
+                }));
+            });
+
+            this.logger.info('All buttons found on page:', { 
+                buttonCount: allButtons.length,
+                buttons: allButtons 
+            });
+
+            // Try each selector pattern
+            for (let i = 0; i < CONFIG.SELECTORS.loginButton.length; i++) {
+                const selector = CONFIG.SELECTORS.loginButton[i];
+                
+                try {
+                    this.logger.debug(`Trying login button selector ${i + 1}/${CONFIG.SELECTORS.loginButton.length}: ${selector}`);
+                    
+                    // Check if element exists
+                    const element = await page.locator(selector).first();
+                    const isVisible = await element.isVisible().catch(() => false);
+                    
+                    if (isVisible) {
+                        this.logger.info(`✅ Found login button with selector: ${selector}`);
+                        return selector;
+                    } else {
+                        this.logger.debug(`❌ Button not visible with selector: ${selector}`);
+                    }
+                } catch (error) {
+                    this.logger.debug(`❌ Error with selector ${selector}: ${error.message}`);
+                }
+            }
+
+            // If no selectors work, take a screenshot for debugging
+            await page.screenshot({ 
+                path: 'login-page-debug.png', 
+                fullPage: true 
+            }).catch(() => {});
+
+            this.logger.error('No login button found with any selector pattern');
+            return null;
+
+        } catch (error) {
+            this.logger.error('Error in findLoginButton:', { error: error.message });
+            return null;
+        }
+    }
     async applyStealthTechniques(page) {
         if (!this.input.enableStealth) return;
 
@@ -419,9 +478,13 @@ class EnterpriseSobhaPortalScraper {
                 // Apply stealth techniques
                 await this.applyStealthTechniques(page);
 
-                // Wait for login form elements
-                await page.waitForSelector(CONFIG.SELECTORS.email, { timeout: 15000 });
-                await page.waitForSelector(CONFIG.SELECTORS.password, { timeout: 15000 });
+                // Wait for login form elements with enhanced detection
+                this.logger.info('Waiting for login form elements');
+                
+                await page.waitForSelector(CONFIG.SELECTORS.email, { timeout: 20000 });
+                await page.waitForSelector(CONFIG.SELECTORS.password, { timeout: 20000 });
+
+                this.logger.info('Login form elements found, filling credentials');
 
                 // Clear and fill email field with human-like typing
                 await page.fill(CONFIG.SELECTORS.email, '');
@@ -434,8 +497,16 @@ class EnterpriseSobhaPortalScraper {
                 // Add realistic human delay
                 await page.waitForTimeout(1000 + Math.random() * 2000);
 
-                // Submit form
-                await page.click(CONFIG.SELECTORS.loginButton);
+                // Find and click login button with enhanced detection
+                this.logger.info('Searching for login button');
+                const loginButtonSelector = await this.findLoginButton(page);
+                
+                if (!loginButtonSelector) {
+                    throw new Error('Login button not found on page. Check page structure or selectors.');
+                }
+
+                this.logger.info(`Clicking login button with selector: ${loginButtonSelector}`);
+                await page.click(loginButtonSelector);
 
                 // Wait for successful login with multiple success indicators
                 try {
@@ -653,11 +724,11 @@ class EnterpriseSobhaPortalScraper {
     async executeScraping() {
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000,
+            requestHandlerTimeoutSecs: 120, // Increased timeout for debugging
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
-                    headless: true,
+                    headless: this.input.enableStealth !== false, // Allow non-headless for debugging
                     args: [
                         '--disable-gpu',
                         '--no-sandbox',
@@ -768,14 +839,31 @@ class EnterpriseSobhaPortalScraper {
                         stack: error.stack
                     });
                     
-                    // Store error results for debugging
+                    // Take debug screenshot on failure
+                    try {
+                        await page.screenshot({ 
+                            path: `error-screenshot-${Date.now()}.png`, 
+                            fullPage: true 
+                        });
+                        this.logger.info('Debug screenshot saved for error analysis');
+                    } catch (screenshotError) {
+                        this.logger.warn('Could not save debug screenshot:', { error: screenshotError.message });
+                    }
+                    
+                    // Store error results for debugging with enhanced info
                     await Dataset.pushData({
                         sessionId: this.sessionId,
                         timestamp: new Date().toISOString(),
                         success: false,
                         error: {
                             message: error.message,
-                            stack: error.stack
+                            stack: error.stack,
+                            type: error.constructor.name
+                        },
+                        debugInfo: {
+                            url: page.url(),
+                            title: await page.title().catch(() => 'Unknown'),
+                            userAgent: await page.evaluate(() => navigator.userAgent).catch(() => 'Unknown')
                         },
                         metrics: this.metrics.getSummary()
                     });
