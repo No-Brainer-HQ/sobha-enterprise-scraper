@@ -474,12 +474,80 @@ class EnterpriseSobhaPortalScraper {
                 // Add realistic human delay
                 await page.waitForTimeout(1000 + Math.random() * 2000);
 
-                // Wait for login button and click it
+                // Wait for login button and click it - with enhanced debugging
                 this.logger.info('Waiting for Sobha portal "Sign in" button');
-                await page.waitForSelector(CONFIG.SELECTORS.loginButton, { timeout: 10000 });
                 
-                this.logger.info('Clicking "Sign in" button');
-                await page.click(CONFIG.SELECTORS.loginButton);
+                // First, let's see what buttons are actually on the page
+                try {
+                    this.logger.info('Debugging: Looking for all buttons on page');
+                    const allButtons = await page.evaluate(() => {
+                        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], [role="button"], a[role="button"]'));
+                        return buttons.map(btn => ({
+                            tagName: btn.tagName,
+                            type: btn.type || 'none',
+                            text: btn.textContent?.trim() || 'no text',
+                            innerHTML: btn.innerHTML?.substring(0, 100) || 'no html',
+                            className: btn.className || 'no class',
+                            id: btn.id || 'no id',
+                            visible: btn.offsetParent !== null,
+                            disabled: btn.disabled || false
+                        }));
+                    });
+
+                    this.logger.info('All buttons found on page:', { 
+                        buttonCount: allButtons.length,
+                        buttons: allButtons 
+                    });
+
+                    // Try multiple button selectors
+                    const buttonSelectors = [
+                        'button:has-text("Sign in")',
+                        'button:has-text("Sign In")', 
+                        'button[type="submit"]',
+                        'input[type="submit"]',
+                        'button',
+                        '[role="button"]',
+                        'a[role="button"]'
+                    ];
+
+                    let foundButton = false;
+                    for (const selector of buttonSelectors) {
+                        try {
+                            this.logger.info(`Trying button selector: ${selector}`);
+                            await page.waitForSelector(selector, { timeout: 2000 });
+                            const isVisible = await page.isVisible(selector);
+                            if (isVisible) {
+                                this.logger.info(`✅ Found visible button with selector: ${selector}`);
+                                await page.click(selector);
+                                foundButton = true;
+                                break;
+                            } else {
+                                this.logger.info(`❌ Button exists but not visible: ${selector}`);
+                            }
+                        } catch (error) {
+                            this.logger.info(`❌ Button not found: ${selector}`);
+                        }
+                    }
+
+                    if (!foundButton) {
+                        // Try clicking the first visible button as fallback
+                        const firstButton = await page.locator('button').first();
+                        const isVisible = await firstButton.isVisible().catch(() => false);
+                        if (isVisible) {
+                            this.logger.info('Fallback: Clicking first visible button');
+                            await firstButton.click();
+                            foundButton = true;
+                        }
+                    }
+
+                    if (!foundButton) {
+                        throw new Error('No clickable button found on login page');
+                    }
+
+                } catch (debugError) {
+                    this.logger.error('Button debugging failed:', { error: debugError.message });
+                    throw debugError;
+                }
 
                 // Wait for successful login with multiple success indicators
                 try {
