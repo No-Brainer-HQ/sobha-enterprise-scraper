@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.3 - SIMPLIFIED (NO LIGHTNING COMPLEXITY)
+ * Version: 1.0.4 - FIXED PROPERTY MODAL EXTRACTION
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -15,14 +15,15 @@ import { randomBytes, createHash } from 'crypto';
 import { performance } from 'perf_hooks';
 
 /**
- * Enterprise Configuration Constants - SIMPLIFIED
+ * Enterprise Configuration Constants - OPTIMIZED FOR MODAL EXTRACTION
  */
 const CONFIG = {
-    // Performance settings - BACK TO REASONABLE TIMEOUTS
-    MAX_CONCURRENT_REQUESTS: 3,
-    REQUEST_TIMEOUT: 600000, // 10 minutes (reasonable)
-    NAVIGATION_TIMEOUT: 60000, // 1 minute (reasonable)
-    CONTENT_WAIT: 15000, // 15 seconds for content to render (simple)
+    // Performance settings
+    MAX_CONCURRENT_REQUESTS: 2,
+    REQUEST_TIMEOUT: 600000, // 10 minutes
+    NAVIGATION_TIMEOUT: 60000, // 1 minute
+    CONTENT_WAIT: 10000, // 10 seconds for content to render
+    MODAL_WAIT: 15000, // 15 seconds for modal to load
     
     // Security settings
     MAX_RETRY_ATTEMPTS: 3,
@@ -36,23 +37,21 @@ const CONFIG = {
     // Portal endpoints
     LOGIN_URL: 'https://www.sobhapartnerportal.com/partnerportal/s/',
     
-    // Selectors - SIMPLE AND WORKING
+    // Selectors - UPDATED FOR MODAL EXTRACTION
     SELECTORS: {
         email: 'input[placeholder="name@example.com"], input[type="email"], textbox, input[name*="email"]',
         password: 'input[type="password"], textbox:has-text("Password"), input[placeholder*="password"]',
         loginButton: 'input[type="submit"]',
         
-        // Simple dashboard detection
-        dashboardIndicator: 'body',
+        // Modal-specific selectors
+        filterPropertiesButton: 'button:has-text("Filter Properties")',
+        propertyModal: '[role="dialog"]:has-text("Available Units"), .slds-modal:has-text("Available Units")',
+        modalTable: 'table, [role="table"], [role="grid"]',
+        modalTableRows: 'tbody tr, [role="row"]:not(:first-child)',
+        modalTableCells: 'td, [role="gridcell"], [role="cell"]',
         
-        // Filter selectors
-        filterBed: 'text=Select Bed',
-        filterArea: 'text=Select Area (SQ. FT.)',
-        filterPrice: 'text=Select Price (AED)',
-        filterPropertyType: 'text=Select Property Type',
-        filterProject: 'text=Select Project',
-        filterButton: 'button:has-text("Filter Properties")',
-        resultsTable: 'table tbody tr, .table tbody tr, [role="row"]:not(:first-child)'
+        // Simple dashboard detection
+        dashboardIndicator: 'body'
     }
 };
 
@@ -293,7 +292,7 @@ class InputValidator {
 }
 
 /**
- * Enterprise Sobha Portal Scraper - SIMPLIFIED
+ * Enterprise Sobha Portal Scraper - WITH MODAL EXTRACTION
  */
 class EnterpriseSobhaPortalScraper {
     constructor(validatedInput) {
@@ -303,7 +302,7 @@ class EnterpriseSobhaPortalScraper {
         this.rateLimiter = new RateLimiter(this.input.requestDelay * 1000);
         this.metrics = new MetricsCollector(this.sessionId);
         
-        this.logger.info('Simplified enterprise scraper initialized', {
+        this.logger.info('Modal-aware enterprise scraper initialized', {
             sessionId: this.sessionId,
             scrapeMode: this.input.scrapeMode,
             maxResults: this.input.maxResults,
@@ -374,7 +373,7 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * SIMPLIFIED: Authentication without Lightning complexity
+     * Authentication (unchanged - working perfectly)
      */
     async authenticate(page) {
         const maxAttempts = this.input.retryAttempts;
@@ -420,8 +419,8 @@ class EnterpriseSobhaPortalScraper {
                 await page.waitForSelector(CONFIG.SELECTORS.loginButton, { timeout: 10000 });
                 await page.click(CONFIG.SELECTORS.loginButton);
 
-                // SIMPLIFIED: Just wait for URL change
-                this.logger.info('Waiting for post-login navigation (simple)');
+                // Wait for URL change
+                this.logger.info('Waiting for post-login navigation');
                 
                 try {
                     // Wait for URL change (most reliable)
@@ -439,11 +438,11 @@ class EnterpriseSobhaPortalScraper {
                         pageTitle 
                     });
 
-                    // SIMPLE: Just wait for page to load content (no Lightning validation)
+                    // Simple wait for content
                     this.logger.info(`Waiting ${CONFIG.CONTENT_WAIT}ms for page content to render`);
                     await page.waitForTimeout(CONFIG.CONTENT_WAIT);
 
-                    // SIMPLE: Try to dismiss any modal (don't worry if it fails)
+                    // Try to dismiss any modal (best effort)
                     await this.dismissPostLoginModal(page);
                     
                     // Additional wait for stability
@@ -455,7 +454,7 @@ class EnterpriseSobhaPortalScraper {
                         this.metrics.recordRequest(true, requestDuration);
                         this.rateLimiter.onSuccess();
                         
-                        this.logger.info('Authentication successful (simple)', {
+                        this.logger.info('Authentication successful', {
                             attempt,
                             duration: Math.round(requestDuration),
                             currentUrl: currentUrl.substring(0, 100)
@@ -505,7 +504,7 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * SIMPLIFIED: Modal dismissal (best effort, no stress if it fails)
+     * Modal dismissal (best effort)
      */
     async dismissPostLoginModal(page) {
         try {
@@ -514,7 +513,7 @@ class EnterpriseSobhaPortalScraper {
             // Wait briefly for any modals to appear
             await page.waitForTimeout(2000);
 
-            // Try common modal close methods (don't fail if they don't work)
+            // Try common modal close methods
             const modalSelectors = [
                 '.slds-modal button[data-key="close"]',
                 '.slds-modal button[title*="Close"]',
@@ -552,24 +551,21 @@ class EnterpriseSobhaPortalScraper {
             this.logger.info('Modal dismissal completed (best effort)');
 
         } catch (error) {
-            this.logger.info('Modal dismissal skipped (no modals found or failed)', { 
-                error: error.message 
-            });
-            // Don't throw error - just continue
+            this.logger.info('Modal dismissal skipped', { error: error.message });
         }
     }
 
     /**
-     * SIMPLIFIED: Navigate to projects page
+     * Navigate to projects page and open property modal
      */
     async navigateToProjects(page) {
         try {
-            this.logger.info('Navigating to Sobha Projects page (simple approach)');
+            this.logger.info('Navigating to Sobha Projects page');
 
             // Wait for page to stabilize
             await page.waitForTimeout(2000);
 
-            // Method 1: Try direct URL navigation (most reliable)
+            // Navigate directly to projects page
             this.logger.info('Attempting direct navigation to projects page');
             try {
                 const currentUrl = page.url();
@@ -582,7 +578,7 @@ class EnterpriseSobhaPortalScraper {
                     timeout: CONFIG.NAVIGATION_TIMEOUT 
                 });
                 
-                // Simple wait for content
+                // Wait for page content to load
                 this.logger.info(`Waiting ${CONFIG.CONTENT_WAIT}ms for projects page to load`);
                 await page.waitForTimeout(CONFIG.CONTENT_WAIT);
                 
@@ -590,375 +586,305 @@ class EnterpriseSobhaPortalScraper {
                 return true;
                 
             } catch (directNavError) {
-                this.logger.warn('Direct navigation failed, trying element-based navigation', { 
-                    error: directNavError.message 
-                });
+                this.logger.warn('Direct navigation failed', { error: directNavError.message });
+                throw directNavError;
             }
-
-            // Method 2: Try finding navigation elements (best effort)
-            const navigationSelectors = [
-                'a[href="/partnerportal/s/sobha-project"]',
-                'a[href*="sobha-project"]',
-                'a:has-text("Sobha Projects")',
-                'button:has-text("Sobha Projects")',
-                'text=Projects',
-                'a[href*="project"]'
-            ];
-
-            for (const selector of navigationSelectors) {
-                try {
-                    this.logger.debug(`Trying navigation selector: ${selector}`);
-                    
-                    await page.waitForSelector(selector, { timeout: 5000 });
-                    
-                    const element = page.locator(selector).first();
-                    const isVisible = await element.isVisible();
-                    
-                    if (isVisible) {
-                        this.logger.info(`Found navigation element: ${selector}`);
-                        
-                        await element.scrollIntoViewIfNeeded();
-                        await page.waitForTimeout(1000);
-                        await element.click();
-                        
-                        // Wait for navigation
-                        await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
-                        await page.waitForTimeout(CONFIG.CONTENT_WAIT);
-                        
-                        this.logger.info(`✅ Successfully navigated using: ${selector}`);
-                        return true;
-                    }
-                } catch (selectorError) {
-                    this.logger.debug(`Navigation selector failed: ${selector}`, { error: selectorError.message });
-                }
-            }
-
-            // If navigation attempts failed, continue with current page
-            this.logger.info('Navigation elements not found, proceeding with current page content');
-            return true;
 
         } catch (error) {
-            this.logger.error('Navigation failed, proceeding with current page', { error: error.message });
-            return true; // Continue anyway
+            this.logger.error('Failed to navigate to projects page', { error: error.message });
+            throw error;
         }
     }
 
     /**
-     * Apply property filters with comprehensive error handling
+     * CRITICAL NEW METHOD: Open property modal by clicking Filter Properties
      */
-    async applyFilters(page) {
-        if (!this.input.filters || Object.keys(this.input.filters).length === 0) {
-            this.logger.info('No filters to apply');
-            return true;
-        }
-
+    async openPropertyModal(page) {
         try {
-            this.logger.info('Applying property filters', { filters: this.input.filters });
+            this.logger.info('Opening property listings modal');
 
-            const filterMappings = {
-                bedrooms: CONFIG.SELECTORS.filterBed,
-                area: CONFIG.SELECTORS.filterArea,
-                price: CONFIG.SELECTORS.filterPrice,
-                propertyType: CONFIG.SELECTORS.filterPropertyType,
-                project: CONFIG.SELECTORS.filterProject
-            };
+            // Wait for page to be ready
+            await page.waitForTimeout(3000);
 
-            for (const [filterKey, filterValue] of Object.entries(this.input.filters)) {
-                if (filterMappings[filterKey]) {
+            // Find and click the "Filter Properties" button
+            this.logger.info('Looking for "Filter Properties" button');
+            
+            try {
+                // Wait for the button to be present and visible
+                await page.waitForSelector(CONFIG.SELECTORS.filterPropertiesButton, { 
+                    timeout: 15000,
+                    state: 'visible'
+                });
+
+                this.logger.info('Found "Filter Properties" button, clicking it');
+                
+                // Click the button
+                await page.click(CONFIG.SELECTORS.filterPropertiesButton);
+                
+                // Wait for modal to appear
+                this.logger.info('Waiting for property modal to load');
+                await page.waitForSelector(CONFIG.SELECTORS.propertyModal, { 
+                    timeout: CONFIG.MODAL_WAIT,
+                    state: 'visible'
+                });
+
+                // Additional wait for modal content to load
+                await page.waitForTimeout(3000);
+
+                this.logger.info('✅ Property modal opened successfully');
+                return true;
+
+            } catch (buttonError) {
+                this.logger.error('Failed to find or click Filter Properties button', { 
+                    error: buttonError.message 
+                });
+                
+                // Try alternative selectors for the button
+                const alternativeButtonSelectors = [
+                    'button:has-text("Filter Properties")',
+                    'input[value*="Filter Properties"]',
+                    '[onclick*="filter"], [onclick*="Filter"]',
+                    'button:contains("Filter Properties")',
+                    '.filter-button, .filterButton',
+                    'button[type="submit"]'
+                ];
+
+                for (const selector of alternativeButtonSelectors) {
                     try {
-                        // Click dropdown with retry logic
-                        await page.click(filterMappings[filterKey]);
-                        await page.waitForTimeout(500 + Math.random() * 1000);
-
-                        // Select option
-                        const optionSelector = `text=${filterValue}`;
-                        await page.waitForSelector(optionSelector, { timeout: 10000 });
-                        await page.click(optionSelector);
-
-                        this.logger.debug(`Applied filter: ${filterKey} = ${filterValue}`);
-                        await page.waitForTimeout(500 + Math.random() * 500);
-
-                    } catch (filterError) {
-                        this.logger.warn(`Failed to apply filter ${filterKey}`, { 
-                            error: filterError.message,
-                            value: filterValue
+                        this.logger.debug(`Trying alternative button selector: ${selector}`);
+                        await page.waitForSelector(selector, { timeout: 5000 });
+                        await page.click(selector);
+                        
+                        // Check if modal appeared
+                        await page.waitForSelector(CONFIG.SELECTORS.propertyModal, { 
+                            timeout: 10000,
+                            state: 'visible'
                         });
+                        
+                        this.logger.info(`✅ Modal opened with alternative selector: ${selector}`);
+                        return true;
+                        
+                    } catch (altError) {
+                        this.logger.debug(`Alternative selector failed: ${selector}`, { error: altError.message });
                     }
                 }
+                
+                throw new Error('Could not find or click Filter Properties button');
             }
 
-            // Apply filters
-            await page.click(CONFIG.SELECTORS.filterButton);
-            await page.waitForLoadState('domcontentloaded');
-
-            this.logger.info('Filters applied successfully');
-            return true;
-
         } catch (error) {
-            this.logger.error('Failed to apply filters', { error: error.message });
-            return false;
+            this.logger.error('Failed to open property modal', { error: error.message });
+            throw error;
         }
     }
 
     /**
-     * SIMPLIFIED: Extract property data from whatever HTML exists
+     * ENHANCED: Extract property data from modal table
      */
     async extractPropertyData(page) {
         try {
-            this.logger.info('Starting simple property data extraction');
+            this.logger.info('Starting modal-based property data extraction');
 
-            // Simple wait for content to be available
-            await page.waitForTimeout(3000);
+            // Wait for modal content to be stable
+            await page.waitForTimeout(2000);
 
-            // Simple page structure analysis
-            const pageStructure = await page.evaluate(() => {
-                return {
-                    tables: document.querySelectorAll('table').length,
-                    dataRows: document.querySelectorAll('tr, [role="row"]').length,
-                    listItems: document.querySelectorAll('li, .list-item').length,
-                    cards: document.querySelectorAll('.card, .slds-card, [class*="card"]').length,
-                    contentElements: document.querySelectorAll('[class*="property"], [class*="unit"], [class*="sobha"]').length,
-                    hasData: document.body.textContent.length,
-                    title: document.title,
-                    hasErrors: (document.body.textContent || '').includes('Error'),
-                    hasLoading: (document.body.textContent || '').includes('Loading')
-                };
-            });
+            // Check if modal is open and has content
+            const modalExists = await page.locator(CONFIG.SELECTORS.propertyModal).count();
+            if (modalExists === 0) {
+                throw new Error('Property modal is not open');
+            }
 
-            this.logger.info('Simple page structure analysis:', pageStructure);
+            this.logger.info('Property modal is open, extracting table data');
 
-            let extractedData = [];
-
-            // Approach 1: Table-based extraction (traditional)
-            try {
-                this.logger.info('Attempting table-based extraction');
+            // Extract data from the modal table
+            const extractedData = await page.evaluate((maxResults) => {
+                const results = [];
                 
-                extractedData = await page.evaluate((maxResults) => {
-                    const results = [];
-                    const tables = document.querySelectorAll('table, [role="table"]');
+                // Find the modal and table within it
+                const modal = document.querySelector('[role="dialog"]:has-text("Available Units"), .slds-modal:has-text("Available Units")') ||
+                             document.querySelector('[role="dialog"], .slds-modal');
+                
+                if (!modal) {
+                    console.log('No modal found');
+                    return results;
+                }
+                
+                console.log('Modal found, looking for table');
+                
+                // Find table within the modal
+                const tables = modal.querySelectorAll('table, [role="table"], [role="grid"]');
+                console.log(`Found ${tables.length} tables in modal`);
+                
+                if (tables.length === 0) {
+                    console.log('No tables found in modal');
+                    return results;
+                }
+                
+                // Extract data from the first table
+                const table = tables[0];
+                const rows = table.querySelectorAll('tbody tr, [role="row"]:not(:first-child)');
+                console.log(`Found ${rows.length} data rows in table`);
+                
+                for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
+                    const row = rows[i];
+                    const cells = row.querySelectorAll('td, [role="gridcell"], [role="cell"]');
                     
-                    tables.forEach((table, tableIndex) => {
-                        const rows = table.querySelectorAll('tbody tr, [role="row"]:not(:first-child)');
+                    if (cells.length >= 6) { // Minimum expected columns
+                        const cellTexts = Array.from(cells).map(cell => cell.textContent?.trim() || '');
                         
-                        for (let i = 0; i < Math.min(rows.length, maxResults - results.length); i++) {
-                            const row = rows[i];
-                            const cells = row.querySelectorAll('td, th, [role="cell"], [role="gridcell"]');
-                            
-                            if (cells.length >= 3) {
-                                const cellTexts = Array.from(cells).map(cell => cell.textContent?.trim() || '');
-                                
-                                // Skip header rows and empty rows
-                                if (cellTexts.some(text => text.length > 0) && 
-                                    !cellTexts[0].toLowerCase().includes('project') &&
-                                    !cellTexts[0].toLowerCase().includes('unit')) {
-                                    
-                                    results.push({
-                                        unitId: `table_${tableIndex}_${i}_${Date.now()}`,
-                                        project: cellTexts[0] || 'Sobha Table Project',
-                                        subProject: cellTexts[1] || '',
-                                        unitType: cellTexts[2] || '',
-                                        floor: cellTexts[3] || '',
-                                        unitNo: cellTexts[4] || `T${tableIndex}-${i + 1}`,
-                                        totalUnitArea: cellTexts[5] || '',
-                                        startingPrice: cellTexts[6] || '',
-                                        availability: 'available',
-                                        sourceUrl: window.location.href,
-                                        extractionMethod: 'Simple-Table',
-                                        rawCellData: cellTexts,
-                                        scrapedAt: new Date().toISOString()
-                                    });
-                                }
-                            }
+                        // Map cells to property data based on table structure
+                        // Columns: Project, Sub Project, Unit Type, Floor, Unit No., Total Unit Area, Starting Price
+                        const property = {
+                            unitId: `sobha_${Date.now()}_${i}`,
+                            project: cellTexts[0] || 'Unknown Project',
+                            subProject: cellTexts[1] || '',
+                            unitType: cellTexts[2] || '',
+                            floor: cellTexts[3] || '',
+                            unitNo: cellTexts[4] || `Unit-${i + 1}`,
+                            totalUnitArea: cellTexts[5] || '',
+                            startingPrice: cellTexts[6] || '',
+                            availability: 'available',
+                            sourceUrl: window.location.href,
+                            extractionMethod: 'Modal-Table',
+                            rawCellData: cellTexts,
+                            scrapedAt: new Date().toISOString()
+                        };
+                        
+                        // Only include if we have meaningful data
+                        if (property.project !== 'Unknown Project' && property.unitNo && property.unitNo !== `Unit-${i + 1}`) {
+                            results.push(property);
+                            console.log(`Extracted property: ${property.project} - ${property.unitNo}`);
+                        }
+                    }
+                }
+                
+                console.log(`Total properties extracted: ${results.length}`);
+                return results;
+                
+            }, this.input.maxResults);
+
+            this.logger.info('Modal table extraction completed', { propertiesFound: extractedData.length });
+
+            // If we found properties, check if we need to scroll for more
+            if (extractedData.length > 0) {
+                try {
+                    this.logger.info('Checking for additional properties by scrolling');
+                    
+                    // Scroll within the modal to load more properties
+                    await page.evaluate(() => {
+                        const modal = document.querySelector('[role="dialog"], .slds-modal');
+                        if (modal) {
+                            const scrollableArea = modal.querySelector('.slds-scrollable, .scroll, [style*="overflow"]') || modal;
+                            scrollableArea.scrollTop = scrollableArea.scrollHeight;
                         }
                     });
                     
-                    return results;
-                }, this.input.maxResults);
-
-                this.logger.info('Table extraction completed', { propertiesFound: extractedData.length });
-
-            } catch (tableError) {
-                this.logger.warn('Table extraction failed', { error: tableError.message });
-            }
-
-            // Approach 2: Card/List-based extraction
-            if (extractedData.length === 0) {
-                try {
-                    this.logger.info('Attempting card/list-based extraction');
+                    // Wait for potential new content
+                    await page.waitForTimeout(3000);
                     
-                    extractedData = await page.evaluate((maxResults) => {
+                    // Extract additional data after scrolling
+                    const additionalData = await page.evaluate((maxResults, currentCount) => {
                         const results = [];
+                        const modal = document.querySelector('[role="dialog"], .slds-modal');
                         
-                        // Look for any structured content
-                        const containers = document.querySelectorAll(
-                            '.card, .slds-card, .list-item, [class*="property"], [class*="unit"], ' +
-                            '[class*="listing"], li, .item, [data-record-id], [data-row-key-value]'
-                        );
-                        
-                        for (let i = 0; i < Math.min(containers.length, maxResults); i++) {
-                            const container = containers[i];
-                            const text = container.textContent?.trim() || '';
-                            
-                            // Filter out navigation and menu items
-                            if (text.length > 30 && 
-                                !text.includes('Dashboard') && 
-                                !text.includes('Profile') && 
-                                !text.includes('About') &&
-                                !text.includes('Marketing') &&
-                                !text.includes('Performance') &&
-                                !text.includes('Loading') &&
-                                !text.includes('Home') &&
-                                (text.includes('Sobha') || 
-                                 text.includes('Project') || 
-                                 text.includes('Unit') || 
-                                 text.includes('Bedroom') ||
-                                 text.includes('sqft') ||
-                                 text.includes('AED') ||
-                                 text.match(/\d{2,}/) ||
-                                 container.className.includes('property') ||
-                                 container.className.includes('unit'))) {
+                        if (modal) {
+                            const table = modal.querySelector('table, [role="table"], [role="grid"]');
+                            if (table) {
+                                const rows = table.querySelectorAll('tbody tr, [role="row"]:not(:first-child)');
                                 
-                                // Try to extract specific data from text patterns
-                                const extractPatterns = (text) => {
-                                    return {
-                                        project: text.match(/(?:project|development)[\s:]*([^,\n]{3,30})/i)?.[1] || 'Sobha Project',
-                                        unit: text.match(/(?:unit|apartment|flat)[\s#]*([a-z0-9\-]{1,10})/i)?.[1] || `Card-${i + 1}`,
-                                        price: text.match(/(?:aed|price|cost)[\s:]*([0-9,]+)/i)?.[1] || '',
-                                        area: text.match(/(\d+)\s*(?:sqft|sq\.?\s*ft)/i)?.[1] || '',
-                                        bedrooms: text.match(/(\d+)\s*(?:bed|bedroom|br)/i)?.[1] || ''
-                                    };
-                                };
-                                
-                                const patterns = extractPatterns(text);
-                                
-                                results.push({
-                                    unitId: `card_${i}_${Date.now()}`,
-                                    project: patterns.project,
-                                    subProject: '',
-                                    unitType: patterns.bedrooms ? `${patterns.bedrooms} Bedroom` : '',
-                                    floor: '',
-                                    unitNo: patterns.unit,
-                                    totalUnitArea: patterns.area ? `${patterns.area} sqft` : '',
-                                    startingPrice: patterns.price ? `${patterns.price} AED` : '',
-                                    availability: 'available',
-                                    rawData: text.substring(0, 300),
-                                    sourceUrl: window.location.href,
-                                    extractionMethod: 'Simple-Card',
-                                    elementDetails: {
-                                        className: container.className,
-                                        id: container.id,
-                                        tagName: container.tagName
-                                    },
-                                    scrapedAt: new Date().toISOString()
-                                });
+                                // Only process rows beyond what we already have
+                                for (let i = currentCount; i < Math.min(rows.length, maxResults); i++) {
+                                    const row = rows[i];
+                                    const cells = row.querySelectorAll('td, [role="gridcell"], [role="cell"]');
+                                    
+                                    if (cells.length >= 6) {
+                                        const cellTexts = Array.from(cells).map(cell => cell.textContent?.trim() || '');
+                                        
+                                        const property = {
+                                            unitId: `sobha_scroll_${Date.now()}_${i}`,
+                                            project: cellTexts[0] || 'Unknown Project',
+                                            subProject: cellTexts[1] || '',
+                                            unitType: cellTexts[2] || '',
+                                            floor: cellTexts[3] || '',
+                                            unitNo: cellTexts[4] || `Unit-${i + 1}`,
+                                            totalUnitArea: cellTexts[5] || '',
+                                            startingPrice: cellTexts[6] || '',
+                                            availability: 'available',
+                                            sourceUrl: window.location.href,
+                                            extractionMethod: 'Modal-Table-Scroll',
+                                            rawCellData: cellTexts,
+                                            scrapedAt: new Date().toISOString()
+                                        };
+                                        
+                                        if (property.project !== 'Unknown Project' && property.unitNo && property.unitNo !== `Unit-${i + 1}`) {
+                                            results.push(property);
+                                        }
+                                    }
+                                }
                             }
                         }
                         
                         return results;
-                    }, this.input.maxResults);
-
-                    this.logger.info('Card/list extraction completed', { propertiesFound: extractedData.length });
-
-                } catch (cardError) {
-                    this.logger.warn('Card extraction failed', { error: cardError.message });
+                    }, this.input.maxResults, extractedData.length);
+                    
+                    // Combine original and additional data
+                    extractedData.push(...additionalData);
+                    
+                    this.logger.info('Scroll extraction completed', { 
+                        additionalProperties: additionalData.length,
+                        totalProperties: extractedData.length 
+                    });
+                    
+                } catch (scrollError) {
+                    this.logger.warn('Failed to scroll for additional properties', { error: scrollError.message });
                 }
             }
 
-            // Approach 3: Any meaningful content extraction
+            // If no properties found, create debug entry
             if (extractedData.length === 0) {
-                this.logger.info('Attempting general content extraction');
+                this.logger.warn('No property data found in modal - creating debug entry');
                 
-                extractedData = await page.evaluate((maxResults) => {
-                    const results = [];
+                const modalAnalysis = await page.evaluate(() => {
+                    const modal = document.querySelector('[role="dialog"], .slds-modal');
+                    if (!modal) return { error: 'No modal found' };
                     
-                    // Get all text content and look for property-related information
-                    const bodyText = document.body.textContent || '';
-                    const meaningfulText = bodyText.replace(/\s+/g, ' ').trim();
-                    
-                    // If page has substantial content that's not just errors/loading
-                    if (meaningfulText.length > 1000 && 
-                        !meaningfulText.includes('CSS Error') &&
-                        !bodyText.includes('Loading') &&
-                        (meaningfulText.includes('Sobha') || 
-                         meaningfulText.includes('Project') || 
-                         meaningfulText.includes('Property'))) {
-                        
-                        // Create a content-based entry
-                        results.push({
-                            unitId: `content_${Date.now()}`,
-                            project: 'Sobha Content Analysis',
-                            subProject: 'General Content',
-                            unitType: '',
-                            floor: '',
-                            unitNo: 'CONTENT-001',
-                            totalUnitArea: '',
-                            startingPrice: '',
-                            availability: 'available',
-                            rawData: meaningfulText.substring(0, 1000),
-                            contentAnalysis: {
-                                textLength: meaningfulText.length,
-                                hasSobha: meaningfulText.includes('Sobha'),
-                                hasProject: meaningfulText.includes('Project'),
-                                hasUnit: meaningfulText.includes('Unit'),
-                                hasPrice: meaningfulText.includes('AED') || meaningfulText.includes('Price')
-                            },
-                            sourceUrl: window.location.href,
-                            extractionMethod: 'Simple-Content',
-                            scrapedAt: new Date().toISOString()
-                        });
-                    }
-                    
-                    return results;
-                }, this.input.maxResults);
-
-                this.logger.info('General content extraction completed', { propertiesFound: extractedData.length });
-            }
-
-            // If still no data, create a simple debug entry
-            if (extractedData.length === 0) {
-                this.logger.warn('No property data found - creating simple debug entry');
-                
-                const simplePageAnalysis = await page.evaluate(() => {
                     return {
-                        url: window.location.href,
-                        title: document.title,
-                        bodyTextLength: document.body.textContent?.length || 0,
-                        hasErrors: (document.body.textContent || '').includes('Error'),
-                        hasLoading: (document.body.textContent || '').includes('Loading'),
-                        sampleText: (document.body.textContent || '').substring(0, 500)
+                        modalText: modal.textContent?.substring(0, 1000) || '',
+                        tableCount: modal.querySelectorAll('table, [role="table"]').length,
+                        rowCount: modal.querySelectorAll('tr, [role="row"]').length,
+                        modalClasses: modal.className || '',
+                        modalHTML: modal.innerHTML?.substring(0, 2000) || ''
                     };
                 });
                 
-                extractedData = [{
-                    unitId: `debug_simple_${Date.now()}`,
-                    project: 'Simple Debug Entry',
+                extractedData.push({
+                    unitId: `debug_modal_${Date.now()}`,
+                    project: 'Modal Debug Entry',
                     subProject: 'No Properties Found',
                     unitType: 'Debug',
                     floor: '0',
-                    unitNo: 'DEBUG-SIMPLE-001',
+                    unitNo: 'DEBUG-MODAL-001',
                     totalUnitArea: '0',
                     startingPrice: '0',
                     availability: 'debug',
-                    sourceUrl: simplePageAnalysis.url,
-                    pageTitle: simplePageAnalysis.title,
+                    sourceUrl: page.url(),
                     debugInfo: {
-                        message: 'No property data found with simple extraction',
-                        pageAnalysis: simplePageAnalysis,
-                        pageStructure: pageStructure
+                        message: 'No property data found in modal',
+                        modalAnalysis: modalAnalysis
                     },
-                    extractionMethod: 'Simple-Debug',
+                    extractionMethod: 'Modal-Debug',
                     scrapedAt: new Date().toISOString()
-                }];
+                });
             }
 
-            // Simple validation
+            // Validate extracted data
             const validProperties = extractedData.filter(prop => 
                 prop.unitId && prop.project && prop.unitNo
             );
 
             this.metrics.recordPropertiesScraped(validProperties.length);
             
-            this.logger.info('Simple property data extraction completed', {
+            this.logger.info('Modal property data extraction completed', {
                 totalExtracted: extractedData.length,
                 validProperties: validProperties.length,
                 extractionMethods: [...new Set(extractedData.map(p => p.extractionMethod))]
@@ -967,34 +893,34 @@ class EnterpriseSobhaPortalScraper {
             return validProperties;
 
         } catch (error) {
-            this.logger.error('Simple property data extraction failed', { error: error.message });
+            this.logger.error('Modal property data extraction failed', { error: error.message });
             
-            // Return simple error entry
+            // Return error entry
             return [{
-                unitId: `error_simple_${Date.now()}`,
-                project: 'Simple Error Entry',
+                unitId: `error_modal_${Date.now()}`,
+                project: 'Modal Error Entry',
                 subProject: 'Extraction failed',
                 unitType: 'Error',
                 floor: '0',
-                unitNo: 'ERROR-SIMPLE-001',
+                unitNo: 'ERROR-MODAL-001',
                 totalUnitArea: '0',
                 startingPrice: '0',
                 availability: 'error',
                 sourceUrl: page.url(),
                 errorInfo: error.message,
-                extractionMethod: 'Simple-Error-Fallback',
+                extractionMethod: 'Modal-Error-Fallback',
                 scrapedAt: new Date().toISOString()
             }];
         }
     }
 
     /**
-     * Main simplified scraping workflow
+     * Main enhanced scraping workflow with modal extraction
      */
     async executeScraping() {
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000, // 10 minutes
+            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000,
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
@@ -1018,7 +944,7 @@ class EnterpriseSobhaPortalScraper {
                 const scrapeStart = performance.now();
                 
                 try {
-                    this.logger.info('Starting simplified scraping workflow', { url: request.url });
+                    this.logger.info('Starting modal-aware scraping workflow', { url: request.url });
 
                     // Memory monitoring
                     this.metrics.recordMemoryUsage();
@@ -1026,21 +952,21 @@ class EnterpriseSobhaPortalScraper {
                     // Apply rate limiting
                     await this.rateLimiter.wait();
 
-                    // Perform authentication (simplified)
+                    // Perform authentication
                     if (!await this.authenticate(page)) {
                         throw new Error('Authentication failed');
                     }
 
-                    // Navigate to projects page (simplified)
+                    // Navigate to projects page
                     await this.navigateToProjects(page);
 
-                    // Apply filters (if any)
-                    await this.applyFilters(page);
+                    // CRITICAL: Open property modal by clicking Filter Properties
+                    await this.openPropertyModal(page);
 
-                    // Extract property data (simplified)
+                    // Extract property data from modal
                     const properties = await this.extractPropertyData(page);
 
-                    // Prepare simplified output
+                    // Prepare results
                     const results = {
                         // Session metadata
                         sessionId: this.sessionId,
@@ -1052,7 +978,7 @@ class EnterpriseSobhaPortalScraper {
                             filtersApplied: this.input.filters,
                             maxResults: this.input.maxResults,
                             enableStealth: this.input.enableStealth,
-                            approach: 'simplified'
+                            approach: 'modal-extraction'
                         },
                         
                         // Results data
@@ -1070,14 +996,14 @@ class EnterpriseSobhaPortalScraper {
                         
                         // Metadata
                         metadata: {
-                            scraperVersion: '1.0.3',
+                            scraperVersion: '1.0.4',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
                                 width: window.innerWidth,
                                 height: window.innerHeight
                             })),
-                            approach: 'simplified',
+                            approach: 'modal-extraction',
                             timestamp: Date.now()
                         }
                     };
@@ -1093,7 +1019,7 @@ class EnterpriseSobhaPortalScraper {
                     // Store results in dataset
                     await Dataset.pushData(results);
 
-                    this.logger.info('Simplified scraping workflow completed successfully', {
+                    this.logger.info('Modal-aware scraping workflow completed successfully', {
                         propertiesCount: properties.length,
                         successRate: this.metrics.getSuccessRate(),
                         duration: Math.round(performance.now() - scrapeStart)
@@ -1103,7 +1029,7 @@ class EnterpriseSobhaPortalScraper {
                     const duration = performance.now() - scrapeStart;
                     this.metrics.recordRequest(false, duration, error);
                     
-                    this.logger.error('Simplified scraping workflow failed', {
+                    this.logger.error('Modal-aware scraping workflow failed', {
                         error: error.message,
                         duration: Math.round(duration),
                         stack: error.stack
@@ -1119,7 +1045,7 @@ class EnterpriseSobhaPortalScraper {
                             stack: error.stack
                         },
                         metrics: this.metrics.getSummary(),
-                        approach: 'simplified'
+                        approach: 'modal-extraction'
                     });
                     
                     throw error;
@@ -1139,12 +1065,12 @@ class EnterpriseSobhaPortalScraper {
 }
 
 /**
- * MAIN SIMPLIFIED ACTOR ENTRY POINT
+ * MAIN MODAL-AWARE ACTOR ENTRY POINT
  */
 async function main() {
     try {
         await Actor.init();
-        console.log('Simplified Actor initialized successfully');
+        console.log('Modal-aware Actor initialized successfully');
 
         // Get and validate input
         const actorInput = await Actor.getInput() ?? {};
@@ -1164,38 +1090,38 @@ async function main() {
             return;
         }
 
-        // Initialize simplified scraper
-        console.log('Initializing simplified enterprise scraper...');
+        // Initialize modal-aware scraper
+        console.log('Initializing modal-aware enterprise scraper...');
         const scraper = new EnterpriseSobhaPortalScraper(validatedInput);
 
-        // Execute simplified scraping workflow
-        console.log('Starting simplified scraping workflow...');
+        // Execute modal-aware scraping workflow
+        console.log('Starting modal-aware scraping workflow...');
         const results = await scraper.executeScraping();
 
         if (results.success) {
-            console.log('Simplified scraping completed successfully');
+            console.log('Modal-aware scraping completed successfully');
             if (Actor.log && typeof Actor.log.info === 'function') {
-                Actor.log.info('Simplified scraping completed successfully', {
+                Actor.log.info('Modal-aware scraping completed successfully', {
                     sessionId: results.sessionId,
                     successRate: results.metrics.successRate,
                     propertiesScraped: results.metrics.propertiesScraped
                 });
             }
         } else {
-            console.error('Simplified scraping failed:', results.error);
+            console.error('Modal-aware scraping failed:', results.error);
             if (Actor.log && typeof Actor.log.error === 'function') {
-                Actor.log.error('Simplified scraping failed', { error: results.error });
+                Actor.log.error('Modal-aware scraping failed', { error: results.error });
             }
-            await Actor.fail(`Simplified scraping failed: ${results.error}`);
+            await Actor.fail(`Modal-aware scraping failed: ${results.error}`);
             return;
         }
 
     } catch (error) {
-        console.error('Critical error in simplified actor:', error.message);
+        console.error('Critical error in modal-aware actor:', error.message);
         console.error('Stack trace:', error.stack);
         
         if (Actor.log && typeof Actor.log.error === 'function') {
-            Actor.log.error('Critical error in simplified actor', { 
+            Actor.log.error('Critical error in modal-aware actor', { 
                 error: error.message,
                 stack: error.stack 
             });
