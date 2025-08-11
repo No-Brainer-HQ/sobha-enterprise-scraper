@@ -516,28 +516,31 @@ class EnterpriseSobhaPortalScraper {
             // STEP 1: Target the specific promotional modal (6% commission modal)
             this.logger.info('Looking for promotional modal (6% commission)');
             
-            // Enhanced promotional modal selectors
+            // Enhanced promotional modal selectors (targeting specific Lightning component)
             const promotionalModalSelectors = [
-                // Target the X close button specifically
+                // Target the specific Lightning component modal
+                '[c-brokerportalhomepage_brokerportalhomepage] button:has-text("×")',
+                '[c-brokerportalhomepage_brokerportalhomepage] .slds-modal button:has-text("×")',
+                '[c-brokerportalhomepage_brokerportalhomepage] button[aria-label*="close"]',
+                '[c-brokerportalhomepage_brokerportalhomepage] button[title*="close"]',
+                
+                // Target the full modal structure close buttons
+                '.slds-modal.slds-fade-in-open.slds-modal_full button:has-text("×")',
+                '.slds-modal.slds-fade-in-open.slds-modal_full button[aria-label*="close"]',
+                '.slds-modal.slds-fade-in-open.slds-modal_full .slds-modal__close',
+                
+                // Generic Lightning component close buttons
+                '[c-brokerportalhomepage_brokerportalhomepage] .slds-button_icon',
+                '[c-brokerportalhomepage_brokerportalhomepage] .slds-button_icon-inverse',
+                '[c-brokerportalhomepage_brokerportalhomepage] [data-key="close"]',
+                
+                // Fallback to standard modal selectors
                 'button:has-text("×")',
                 '[role="dialog"] button:has-text("×")',
                 '.slds-modal button:has-text("×")',
-                
-                // Target close buttons in modal header
-                '[role="dialog"] header button',
-                '.slds-modal__header button',
-                '.slds-modal header button',
-                
-                // Generic close button approaches
                 'button[aria-label*="close"]',
-                'button[aria-label*="Close"]',
                 'button[title*="close"]',
-                'button[title*="Close"]',
-                
-                // Target modal close by classes
-                '.slds-modal__close',
-                '.slds-button_icon-inverse',
-                '[data-key="close"]'
+                '.slds-modal__close'
             ];
 
             let modalClosed = false;
@@ -573,7 +576,36 @@ class EnterpriseSobhaPortalScraper {
                     const modalClosedByJS = await page.evaluate(() => {
                         console.log('Looking for promotional modal via JavaScript...');
                         
-                        // Look for modal containers
+                        // First, look for the specific Lightning component modal
+                        const lightningComponentModal = document.querySelector('[c-brokerportalhomepage_brokerportalhomepage]');
+                        if (lightningComponentModal) {
+                            console.log('Found Lightning component modal');
+                            
+                            // Look for close buttons within the Lightning component
+                            const closeButtons = lightningComponentModal.querySelectorAll('button');
+                            console.log(`Lightning component has ${closeButtons.length} buttons`);
+                            
+                            for (const button of closeButtons) {
+                                const text = button.textContent || button.innerHTML || '';
+                                const ariaLabel = button.getAttribute('aria-label') || '';
+                                const title = button.getAttribute('title') || '';
+                                const className = button.className || '';
+                                
+                                // Check if it's a close button
+                                if (text.includes('×') || 
+                                    ariaLabel.toLowerCase().includes('close') || 
+                                    title.toLowerCase().includes('close') ||
+                                    className.includes('slds-modal__close') ||
+                                    className.includes('slds-button_icon')) {
+                                    
+                                    console.log(`Found Lightning component close button: ${text || ariaLabel || title || 'icon button'}`);
+                                    button.click();
+                                    return true;
+                                }
+                            }
+                        }
+                        
+                        // Fallback: Look for modal containers generally
                         const modals = document.querySelectorAll('[role="dialog"], .slds-modal');
                         console.log(`Found ${modals.length} modal containers`);
                         
@@ -639,9 +671,14 @@ class EnterpriseSobhaPortalScraper {
             await page.waitForTimeout(2000);
             
             const finalModalCount = await page.evaluate(() => {
-                const visibleModals = Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
+                // Check for both general modals and the specific Lightning component modal
+                const generalModals = Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
                     .filter(modal => modal.offsetParent !== null);
-                return visibleModals.length;
+                    
+                const lightningComponentModals = Array.from(document.querySelectorAll('[c-brokerportalhomepage_brokerportalhomepage]'))
+                    .filter(modal => modal.offsetParent !== null && modal.querySelector('.slds-modal'));
+                    
+                return generalModals.length + lightningComponentModals.length;
             });
             
             if (finalModalCount === 0) {
@@ -813,13 +850,14 @@ class EnterpriseSobhaPortalScraper {
                     pageTitle: document.title,
                     currentUrl: window.location.href,
                     
-                    // Check for remaining modals
-                    visibleModals: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
+                    // Check for remaining modals (including Lightning component modal)
+                    visibleModals: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal, [c-brokerportalhomepage_brokerportalhomepage]'))
                         .filter(modal => modal.offsetParent !== null).length,
-                    modalInfo: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal'))
+                    modalInfo: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal, [c-brokerportalhomepage_brokerportalhomepage]'))
                         .filter(modal => modal.offsetParent !== null)
                         .map(modal => ({
                             className: modal.className,
+                            componentName: modal.getAttribute('c-brokerportalhomepage_brokerportalhomepage') ? 'Lightning-HomePage' : 'Standard',
                             textContent: (modal.textContent || '').substring(0, 100)
                         })),
                     
