@@ -43,9 +43,9 @@ const CONFIG = {
         password: 'input[type="password"], textbox:has-text("Password"), input[placeholder*="password"]',
         loginButton: 'input[type="submit"]',
         
-        // Modal-specific selectors
+        // Modal-specific selectors (FIXED: removed :has-text() selectors)
         filterPropertiesButton: 'button:has-text("Filter Properties")',
-        propertyModal: '[role="dialog"]:has-text("Available Units"), .slds-modal:has-text("Available Units")',
+        propertyModal: '[role="dialog"], .slds-modal',
         modalTable: 'table, [role="table"], [role="grid"]',
         modalTableRows: 'tbody tr, [role="row"]:not(:first-child)',
         modalTableCells: 'td, [role="gridcell"], [role="cell"]',
@@ -969,7 +969,9 @@ class EnterpriseSobhaPortalScraper {
                 if (buttonFound) {
                     // Wait for modal to appear
                     this.logger.info('Button clicked, waiting for property modal to load');
-                    await page.waitForSelector(CONFIG.SELECTORS.propertyModal, { 
+                    
+                    // Wait for modal using standard CSS selectors
+                    await page.waitForSelector('[role="dialog"], .slds-modal', { 
                         timeout: CONFIG.MODAL_WAIT,
                         state: 'visible'
                     });
@@ -1035,7 +1037,7 @@ class EnterpriseSobhaPortalScraper {
                         await page.waitForTimeout(5000);
                         
                         // Check if modal appeared
-                        const modalCount = await page.locator(CONFIG.SELECTORS.propertyModal).count();
+                        const modalCount = await page.locator('[role="dialog"], .slds-modal').count();
                         if (modalCount > 0) {
                             this.logger.info('✅ Modal opened with JavaScript button detection');
                             return true;
@@ -1067,8 +1069,20 @@ class EnterpriseSobhaPortalScraper {
             await page.waitForTimeout(2000);
 
             // Check if modal is open and has content
-            const modalExists = await page.locator(CONFIG.SELECTORS.propertyModal).count();
-            if (modalExists === 0) {
+            const modalExists = await page.evaluate(() => {
+                // Try to find modal by role and check text content manually
+                const dialogModals = document.querySelectorAll('[role="dialog"]');
+                for (const dialogModal of dialogModals) {
+                    if (dialogModal.textContent && dialogModal.textContent.includes('Available Units')) {
+                        return true;
+                    }
+                }
+                
+                // Fallback: check for any modal
+                return document.querySelector('[role="dialog"]') || document.querySelector('.slds-modal');
+            });
+            
+            if (!modalExists) {
                 throw new Error('Property modal is not open');
             }
 
@@ -1078,9 +1092,33 @@ class EnterpriseSobhaPortalScraper {
             const extractedData = await page.evaluate((maxResults) => {
                 const results = [];
                 
-                // Find the modal and table within it
-                const modal = document.querySelector('[role="dialog"]:has-text("Available Units"), .slds-modal:has-text("Available Units")') ||
-                             document.querySelector('[role="dialog"], .slds-modal');
+                // Find the modal (using standard CSS selectors only)
+                let modal = null;
+                
+                // Try to find modal by role and check text content manually
+                const dialogModals = document.querySelectorAll('[role="dialog"]');
+                for (const dialogModal of dialogModals) {
+                    if (dialogModal.textContent && dialogModal.textContent.includes('Available Units')) {
+                        modal = dialogModal;
+                        break;
+                    }
+                }
+                
+                // Fallback: try SLDS modal class and check text content
+                if (!modal) {
+                    const sldsModals = document.querySelectorAll('.slds-modal');
+                    for (const sldsModal of sldsModals) {
+                        if (sldsModal.textContent && sldsModal.textContent.includes('Available Units')) {
+                            modal = sldsModal;
+                            break;
+                        }
+                    }
+                }
+                
+                // Final fallback: just get any visible modal
+                if (!modal) {
+                    modal = document.querySelector('[role="dialog"]') || document.querySelector('.slds-modal');
+                }
                 
                 if (!modal) {
                     console.log('No modal found');
@@ -1089,7 +1127,7 @@ class EnterpriseSobhaPortalScraper {
                 
                 console.log('Modal found, looking for table');
                 
-                // Find table within the modal
+                // Find table within the modal (using standard CSS selectors)
                 const tables = modal.querySelectorAll('table, [role="table"], [role="grid"]');
                 console.log(`Found ${tables.length} tables in modal`);
                 
@@ -1150,7 +1188,23 @@ class EnterpriseSobhaPortalScraper {
                     
                     // Scroll within the modal to load more properties
                     await page.evaluate(() => {
-                        const modal = document.querySelector('[role="dialog"], .slds-modal');
+                        // Find modal using standard CSS selectors
+                        let modal = null;
+                        
+                        // Try to find modal by role and check text content manually
+                        const dialogModals = document.querySelectorAll('[role="dialog"]');
+                        for (const dialogModal of dialogModals) {
+                            if (dialogModal.textContent && dialogModal.textContent.includes('Available Units')) {
+                                modal = dialogModal;
+                                break;
+                            }
+                        }
+                        
+                        // Fallback: try SLDS modal class
+                        if (!modal) {
+                            modal = document.querySelector('[role="dialog"]') || document.querySelector('.slds-modal');
+                        }
+                        
                         if (modal) {
                             const scrollableArea = modal.querySelector('.slds-scrollable, .scroll, [style*="overflow"]') || modal;
                             scrollableArea.scrollTop = scrollableArea.scrollHeight;
@@ -1163,7 +1217,23 @@ class EnterpriseSobhaPortalScraper {
                     // Extract additional data after scrolling
                     const additionalData = await page.evaluate((maxResults, currentCount) => {
                         const results = [];
-                        const modal = document.querySelector('[role="dialog"], .slds-modal');
+                        
+                        // Find modal using standard CSS selectors
+                        let modal = null;
+                        
+                        // Try to find modal by role and check text content manually
+                        const dialogModals = document.querySelectorAll('[role="dialog"]');
+                        for (const dialogModal of dialogModals) {
+                            if (dialogModal.textContent && dialogModal.textContent.includes('Available Units')) {
+                                modal = dialogModal;
+                                break;
+                            }
+                        }
+                        
+                        // Fallback: try SLDS modal class
+                        if (!modal) {
+                            modal = document.querySelector('[role="dialog"]') || document.querySelector('.slds-modal');
+                        }
                         
                         if (modal) {
                             const table = modal.querySelector('table, [role="table"], [role="grid"]');
@@ -1223,7 +1293,23 @@ class EnterpriseSobhaPortalScraper {
                 this.logger.warn('No property data found in modal - creating debug entry');
                 
                 const modalAnalysis = await page.evaluate(() => {
-                    const modal = document.querySelector('[role="dialog"], .slds-modal');
+                    // Find modal using standard CSS selectors
+                    let modal = null;
+                    
+                    // Try to find modal by role and check text content manually
+                    const dialogModals = document.querySelectorAll('[role="dialog"]');
+                    for (const dialogModal of dialogModals) {
+                        if (dialogModal.textContent && dialogModal.textContent.includes('Available Units')) {
+                            modal = dialogModal;
+                            break;
+                        }
+                    }
+                    
+                    // Fallback: try SLDS modal class
+                    if (!modal) {
+                        modal = document.querySelector('[role="dialog"]') || document.querySelector('.slds-modal');
+                    }
+                    
                     if (!modal) return { error: 'No modal found' };
                     
                     return {
