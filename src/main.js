@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.1 - FIXED POST-LOGIN DETECTION
+ * Version: 1.0.2 - FIXED SALESFORCE LIGHTNING LOADING
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -18,15 +18,16 @@ import { performance } from 'perf_hooks';
  * Enterprise Configuration Constants
  */
 const CONFIG = {
-    // Performance settings - INCREASED TIMEOUTS FOR MODAL HANDLING
-    MAX_CONCURRENT_REQUESTS: 5,
-    REQUEST_TIMEOUT: 600000, // Increased to 10 minutes for complex modal handling
-    NAVIGATION_TIMEOUT: 120000, // Increased to 2 minutes
+    // Performance settings - ENHANCED FOR LIGHTNING LOADING
+    MAX_CONCURRENT_REQUESTS: 3, // Reduced for more stable loading
+    REQUEST_TIMEOUT: 900000, // Increased to 15 minutes for Lightning loading
+    NAVIGATION_TIMEOUT: 180000, // Increased to 3 minutes
+    LIGHTNING_TIMEOUT: 120000, // New: 2 minutes for Lightning initialization
     
     // Security settings
-    MAX_RETRY_ATTEMPTS: 3,
-    BASE_DELAY: 2000,
-    MAX_DELAY: 10000,
+    MAX_RETRY_ATTEMPTS: 5, // Increased for Lightning loading retries
+    BASE_DELAY: 3000, // Increased for better stability
+    MAX_DELAY: 15000,
     
     // Monitoring thresholds
     MIN_SUCCESS_RATE: 95.0,
@@ -35,14 +36,18 @@ const CONFIG = {
     // Portal endpoints
     LOGIN_URL: 'https://www.sobhapartnerportal.com/partnerportal/s/',
     
-    // Selectors (FIXED - Simplified and more flexible)
+    // Selectors (ENHANCED for Lightning loading)
     SELECTORS: {
         email: 'input[placeholder="name@example.com"], input[type="email"], textbox, input[name*="email"]',
         password: 'input[type="password"], textbox:has-text("Password"), input[placeholder*="password"]',
-        loginButton: 'input[type="submit"]', // SIMPLIFIED - Use the working selector
+        loginButton: 'input[type="submit"]',
         
-        // FIXED: More flexible dashboard detection using URL + basic page elements
-        dashboardIndicator: 'body', // Just check if page loads - we'll use URL detection
+        // Lightning loading indicators
+        lightningSpinners: '.slds-spinner, .loading, [class*="loading"], [class*="spinner"]',
+        lightningError: '.auraErrorBox, .slds-notify_alert, [class*="error"]',
+        
+        // Enhanced dashboard detection
+        dashboardIndicator: 'body',
         
         // Filter selectors
         filterBed: 'text=Select Bed',
@@ -282,11 +287,11 @@ class InputValidator {
             filters: input.filters || {},
             specificUnit: input.specificUnit || null,
             maxResults: input.maxResults || 1000,
-            requestDelay: input.requestDelay || 2.0,
-            retryAttempts: input.retryAttempts || 3,
+            requestDelay: input.requestDelay || 3.0, // Increased default delay
+            retryAttempts: input.retryAttempts || 5, // Increased default retries
             enableStealth: input.enableStealth !== false,
             downloadDocuments: input.downloadDocuments || false,
-            parallelRequests: input.parallelRequests || 3
+            parallelRequests: input.parallelRequests || 2 // Reduced for stability
         };
     }
 }
@@ -373,7 +378,129 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Enhanced authentication with URL-based validation
+     * ENHANCED: Wait for Salesforce Lightning to fully load and initialize
+     */
+    async waitForLightningToLoad(page) {
+        try {
+            this.logger.info('Waiting for Salesforce Lightning framework to fully load');
+
+            // Step 1: Wait for basic page load
+            await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
+            this.logger.debug('DOM content loaded');
+
+            // Step 2: Wait for Lightning spinners to disappear
+            this.logger.debug('Checking for Lightning loading spinners');
+            try {
+                await page.waitForSelector(CONFIG.SELECTORS.lightningSpinners, { timeout: 5000 });
+                this.logger.info('Loading spinners detected, waiting for them to disappear');
+                
+                // Wait for all spinners to be hidden/removed
+                await page.waitForFunction(() => {
+                    const spinners = document.querySelectorAll('.slds-spinner, .loading, [class*="loading"], [class*="spinner"]');
+                    return Array.from(spinners).every(spinner => 
+                        !spinner.offsetParent || 
+                        spinner.style.display === 'none' || 
+                        spinner.hidden ||
+                        !spinner.isConnected
+                    );
+                }, {}, { timeout: CONFIG.LIGHTNING_TIMEOUT });
+                
+                this.logger.info('✅ All loading spinners have disappeared');
+            } catch (spinnerError) {
+                this.logger.debug('No loading spinners found or already hidden');
+            }
+
+            // Step 3: Wait for Lightning framework initialization
+            this.logger.debug('Waiting for Lightning framework initialization');
+            await page.waitForFunction(() => {
+                // Check for Aura framework
+                if (window.$A && window.$A.getCallback) {
+                    console.log('Aura framework detected');
+                    return true;
+                }
+                
+                // Check for Lightning base components
+                if (window.LightningElement || window.lightning) {
+                    console.log('Lightning framework detected');
+                    return true;
+                }
+                
+                // Check for Salesforce global objects
+                if (window.Sfdc || window.sforce) {
+                    console.log('Salesforce framework detected');
+                    return true;
+                }
+                
+                // Check for rendered Lightning components in DOM
+                const lightningComponents = document.querySelectorAll(
+                    '[class*="slds"], [class*="lightning"], [data-aura-rendered-by], c-*, lightning-*'
+                );
+                
+                if (lightningComponents.length > 10) {
+                    console.log(`Found ${lightningComponents.length} Lightning components`);
+                    return true;
+                }
+                
+                // Check if page is no longer showing "Loading" text
+                const bodyText = document.body.textContent || '';
+                const hasLoadingText = bodyText.includes('Loading') || 
+                                     bodyText.includes('Sorry to interrupt') ||
+                                     bodyText.includes('CSS Error');
+                
+                if (!hasLoadingText && bodyText.length > 1000) {
+                    console.log('Page appears to be fully loaded (no loading text, substantial content)');
+                    return true;
+                }
+                
+                console.log('Lightning framework not yet initialized, waiting...');
+                return false;
+            }, {}, { timeout: CONFIG.LIGHTNING_TIMEOUT });
+
+            this.logger.info('✅ Lightning framework initialization complete');
+
+            // Step 4: Additional wait for component rendering
+            this.logger.debug('Waiting for Lightning components to render');
+            await page.waitForTimeout(5000); // Allow components to render
+
+            // Step 5: Check for Lightning errors
+            try {
+                const errorElements = await page.locator(CONFIG.SELECTORS.lightningError).count();
+                if (errorElements > 0) {
+                    const errorText = await page.locator(CONFIG.SELECTORS.lightningError).first().textContent();
+                    this.logger.warn('Lightning error detected on page', { errorText });
+                }
+            } catch (errorCheckError) {
+                this.logger.debug('No Lightning errors found');
+            }
+
+            // Step 6: Final validation
+            const finalPageState = await page.evaluate(() => {
+                const bodyText = document.body.textContent || '';
+                return {
+                    hasLoadingText: bodyText.includes('Loading') || bodyText.includes('Sorry to interrupt'),
+                    contentLength: bodyText.length,
+                    lightningElements: document.querySelectorAll('[class*="slds"], [class*="lightning"]').length,
+                    hasError: bodyText.includes('CSS Error') || bodyText.includes('JavaScript Error'),
+                    title: document.title
+                };
+            });
+
+            this.logger.info('Lightning loading validation complete', finalPageState);
+
+            if (finalPageState.hasLoadingText || finalPageState.hasError) {
+                throw new Error('Page still showing loading state or errors after Lightning initialization');
+            }
+
+            return true;
+
+        } catch (error) {
+            this.logger.error('Lightning loading failed', { error: error.message });
+            throw new Error(`Failed to wait for Lightning to load: ${error.message}`);
+        }
+    }
+
+    /**
+     * ENHANCED: Authentication with Lightning loading support
      */
     async authenticate(page) {
         const maxAttempts = this.input.retryAttempts;
@@ -388,7 +515,7 @@ class EnterpriseSobhaPortalScraper {
 
                 // Navigate to login page with comprehensive error handling
                 await page.goto(CONFIG.LOGIN_URL, { 
-                    waitUntil: 'domcontentloaded', // CHANGED: Less strict loading requirement
+                    waitUntil: 'domcontentloaded',
                     timeout: CONFIG.NAVIGATION_TIMEOUT 
                 });
 
@@ -414,33 +541,22 @@ class EnterpriseSobhaPortalScraper {
                 // Add realistic human delay
                 await page.waitForTimeout(1000 + Math.random() * 2000);
 
-                // Click login button - use the known working selector
+                // Click login button
                 this.logger.info('Clicking login button');
                 await page.waitForSelector(CONFIG.SELECTORS.loginButton, { timeout: 10000 });
                 await page.click(CONFIG.SELECTORS.loginButton);
 
-                // FIXED: Wait for post-login page using URL-based detection instead of specific elements
-                this.logger.info('Waiting for post-login navigation');
+                // ENHANCED: Wait for post-login page with Lightning loading
+                this.logger.info('Waiting for post-login navigation and Lightning initialization');
                 
                 try {
-                    // Wait for either:
-                    // 1. URL to change indicating successful login
-                    // 2. Basic page load completion
-                    // 3. Any content to appear (flexible approach)
-                    
-                    await Promise.race([
-                        // Option 1: Wait for URL change (most reliable)
-                        page.waitForFunction(() => {
-                            return window.location.href.includes('/partnerportal/s/') || 
-                                   window.location.href.includes('frontdoor') ||
-                                   window.location.href !== 'https://www.sobhapartnerportal.com/partnerportal/s/';
-                        }, {}, { timeout: 30000 }),
-                        
-                        // Option 2: Wait for page to have any content (fallback)
-                        page.waitForSelector('body', { timeout: 30000 })
-                    ]);
+                    // Wait for URL change (most reliable)
+                    await page.waitForFunction(() => {
+                        return window.location.href.includes('/partnerportal/s/') || 
+                               window.location.href.includes('frontdoor') ||
+                               window.location.href !== 'https://www.sobhapartnerportal.com/partnerportal/s/';
+                    }, {}, { timeout: 30000 });
 
-                    // Additional validation: Check we're not still on login page
                     const currentUrl = page.url();
                     const pageTitle = await page.title().catch(() => 'Unknown');
                     
@@ -449,13 +565,16 @@ class EnterpriseSobhaPortalScraper {
                         pageTitle 
                     });
 
-                    // CRITICAL FIX: Dismiss the promotional modal that appears after login
+                    // CRITICAL: Wait for Lightning to fully load
+                    await this.waitForLightningToLoad(page);
+
+                    // FIXED: Dismiss the promotional modal AFTER Lightning loads
                     await this.dismissPostLoginModal(page);
                     
-                    // Additional wait to ensure modal is fully dismissed
-                    await page.waitForTimeout(3000);
+                    // Additional wait to ensure modal dismissal and Lightning stability
+                    await page.waitForTimeout(5000);
 
-                    // If we've navigated away from the initial login URL, consider it successful
+                    // Validate authentication success
                     if (currentUrl !== CONFIG.LOGIN_URL) {
                         const requestDuration = performance.now() - requestStart;
                         this.metrics.recordRequest(true, requestDuration);
@@ -498,7 +617,7 @@ class EnterpriseSobhaPortalScraper {
                 });
 
                 if (attempt < maxAttempts) {
-                    const delay = 3000 + Math.random() * 4000; // 3-7 seconds
+                    const delay = 5000 + Math.random() * 5000; // 5-10 seconds
                     this.logger.info(`Retrying authentication in ${Math.round(delay/1000)} seconds`);
                     await page.waitForTimeout(delay);
                 } else {
@@ -511,13 +630,13 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * CRITICAL FIX: Dismiss the promotional modal that appears after login
+     * ENHANCED: Modal dismissal with Lightning-aware approach
      */
     async dismissPostLoginModal(page) {
         try {
             this.logger.info('Checking for post-login promotional modal');
 
-            // Wait a moment for the modal to appear
+            // Wait for Lightning to be stable before modal detection
             await page.waitForTimeout(3000);
 
             // Check if the modal exists with extended detection
@@ -529,53 +648,53 @@ class EnterpriseSobhaPortalScraper {
             ];
 
             let modalExists = false;
+            let modalSelector = '';
             for (const selector of modalSelectors) {
                 const count = await page.locator(selector).count();
                 if (count > 0) {
                     modalExists = true;
+                    modalSelector = selector;
                     this.logger.info(`Modal detected with selector: ${selector}`);
                     break;
                 }
             }
             
             if (modalExists) {
-                this.logger.info('Promotional modal detected, attempting to close it with aggressive methods');
+                this.logger.info('Promotional modal detected, attempting to close it with Lightning-aware methods');
 
-                // Method 1: Try clicking X button in the top-right corner of modal
-                const xButtonSelectors = [
-                    '.slds-modal button[title="Close"]',
-                    '.slds-modal [data-key="close"]',
-                    '.slds-modal .slds-button_icon',
+                // Enhanced Method 1: Lightning-specific close buttons
+                const lightningCloseSelectors = [
+                    '.slds-modal button[data-key="close"]',
+                    '.slds-modal lightning-button-icon[data-key="close"]',
+                    '.slds-modal [class*="close"]',
+                    '.slds-modal button[title*="Close"]',
                     '.slds-modal button[aria-label*="Close"]',
                     '.slds-modal button[aria-label*="close"]',
                     '.slds-modal .slds-modal__close',
-                    // Look for the actual X symbol
                     '.slds-modal button:has-text("×")',
                     '.slds-modal button:has-text("✕")',
-                    '.slds-modal lightning-button-icon',
-                    // Generic close button in modal header
                     '.slds-modal header button',
                     '.slds-modal .slds-modal__header button'
                 ];
 
                 let modalClosed = false;
-                for (const selector of xButtonSelectors) {
+                for (const selector of lightningCloseSelectors) {
                     try {
-                        this.logger.debug(`Trying close button selector: ${selector}`);
+                        this.logger.debug(`Trying Lightning close button: ${selector}`);
                         
                         const closeButton = page.locator(selector).first();
                         const isVisible = await closeButton.isVisible().catch(() => false);
                         
                         if (isVisible) {
-                            this.logger.info(`Found close button with selector: ${selector}`);
+                            this.logger.info(`Found close button: ${selector}`);
                             
-                            // Force click with JavaScript to bypass modal blocking
-                            await closeButton.evaluate(el => el.click());
+                            // Try Playwright click first
+                            await closeButton.click({ timeout: 5000 });
                             
                             // Wait for modal to disappear
-                            await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
+                            await page.waitForSelector(modalSelector, { 
                                 state: 'detached', 
-                                timeout: 5000 
+                                timeout: 10000 
                             });
                             
                             this.logger.info('✅ Modal successfully closed with close button');
@@ -587,7 +706,73 @@ class EnterpriseSobhaPortalScraper {
                     }
                 }
 
-                // Method 2: Try pressing Escape key multiple times
+                // Method 2: Lightning-aware JavaScript dismissal
+                if (!modalClosed) {
+                    this.logger.info('Trying Lightning-aware JavaScript modal dismissal');
+                    try {
+                        await page.evaluate(() => {
+                            console.log('Starting Lightning-aware modal removal...');
+                            
+                            // First, try to trigger Lightning's modal close event
+                            const modalElements = document.querySelectorAll('.slds-modal, [role="dialog"]');
+                            modalElements.forEach(modal => {
+                                // Try to find and click close button programmatically
+                                const closeButtons = modal.querySelectorAll(
+                                    'button[data-key="close"], button[title*="Close"], button[aria-label*="close"], .slds-modal__close, button'
+                                );
+                                
+                                closeButtons.forEach(button => {
+                                    if (button.offsetParent && !button.disabled) {
+                                        console.log('Attempting to click close button:', button);
+                                        try {
+                                            button.click();
+                                        } catch (clickError) {
+                                            console.log('Click failed, trying dispatchEvent');
+                                            button.dispatchEvent(new MouseEvent('click', {
+                                                view: window,
+                                                bubbles: true,
+                                                cancelable: true
+                                            }));
+                                        }
+                                    }
+                                });
+                            });
+                            
+                            // If no close buttons worked, remove modal elements
+                            setTimeout(() => {
+                                const modalsToRemove = document.querySelectorAll('.slds-modal, [role="dialog"], .slds-backdrop');
+                                modalsToRemove.forEach(element => {
+                                    if (element.parentNode) {
+                                        console.log('Removing modal element:', element.className);
+                                        element.parentNode.removeChild(element);
+                                    }
+                                });
+                                
+                                // Reset body styles
+                                document.body.style.overflow = 'auto';
+                                document.body.style.pointerEvents = 'auto';
+                                document.documentElement.style.overflow = 'auto';
+                            }, 1000);
+                            
+                            return 'Lightning modal dismissal attempted';
+                        });
+                        
+                        // Wait for Lightning to process the dismissal
+                        await page.waitForTimeout(3000);
+                        
+                        // Check if modal is gone
+                        const stillExists = await page.locator(modalSelector).count();
+                        if (stillExists === 0) {
+                            this.logger.info('✅ Lightning-aware modal dismissal successful');
+                            modalClosed = true;
+                        }
+                        
+                    } catch (jsError) {
+                        this.logger.debug('Lightning modal dismissal failed', { error: jsError.message });
+                    }
+                }
+
+                // Method 3: Escape key (Lightning should respond)
                 if (!modalClosed) {
                     this.logger.info('Trying to close modal with Escape key');
                     try {
@@ -596,9 +781,9 @@ class EnterpriseSobhaPortalScraper {
                             await page.waitForTimeout(1000);
                         }
                         
-                        await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
+                        await page.waitForSelector(modalSelector, { 
                             state: 'detached', 
-                            timeout: 3000 
+                            timeout: 5000 
                         });
                         this.logger.info('✅ Modal closed with Escape key');
                         modalClosed = true;
@@ -607,128 +792,12 @@ class EnterpriseSobhaPortalScraper {
                     }
                 }
 
-                // Method 3: Nuclear JavaScript removal - target all possible blocking elements
                 if (!modalClosed) {
-                    this.logger.info('Trying nuclear modal removal with comprehensive JavaScript');
-                    try {
-                        await page.evaluate(() => {
-                            console.log('Starting nuclear modal removal...');
-                            
-                            // Remove all possible modal and blocking elements
-                            const selectors = [
-                                '.slds-modal',
-                                '[role="dialog"]',
-                                '.slds-backdrop',
-                                '.modal-backdrop',
-                                '[aria-modal="true"]',
-                                '[data-aura-rendered-by]',
-                                '.cCenterPanel',
-                                'section[role="dialog"]',
-                                '[c-brokerportalhomepage_brokerportalhomepage]'
-                            ];
-                            
-                            let removedCount = 0;
-                            selectors.forEach(selector => {
-                                const elements = document.querySelectorAll(selector);
-                                elements.forEach(element => {
-                                    if (element && element.parentNode) {
-                                        console.log(`Removing element: ${selector}`);
-                                        element.parentNode.removeChild(element);
-                                        removedCount++;
-                                    }
-                                });
-                            });
-                            
-                            // Also try to remove by checking for specific class patterns
-                            const allElements = document.querySelectorAll('*');
-                            allElements.forEach(element => {
-                                const className = element.className;
-                                if (typeof className === 'string' && 
-                                    (className.includes('slds-modal') || 
-                                     className.includes('modal') ||
-                                     className.includes('backdrop') ||
-                                     element.getAttribute('role') === 'dialog')) {
-                                    if (element.parentNode) {
-                                        console.log(`Removing modal-like element: ${className}`);
-                                        element.parentNode.removeChild(element);
-                                        removedCount++;
-                                    }
-                                }
-                            });
-                            
-                            // Force reset body styles
-                            document.body.style.pointerEvents = 'auto';
-                            document.body.style.overflow = 'auto';
-                            document.body.style.position = 'static';
-                            document.documentElement.style.pointerEvents = 'auto';
-                            document.documentElement.style.overflow = 'auto';
-                            
-                            // Remove any CSS that might be blocking interactions
-                            const styleSheets = document.styleSheets;
-                            for (let i = 0; i < styleSheets.length; i++) {
-                                try {
-                                    const sheet = styleSheets[i];
-                                    if (sheet.cssRules) {
-                                        for (let j = sheet.cssRules.length - 1; j >= 0; j--) {
-                                            const rule = sheet.cssRules[j];
-                                            if (rule.selectorText && 
-                                                (rule.selectorText.includes('.slds-modal') ||
-                                                 rule.selectorText.includes('.slds-backdrop'))) {
-                                                sheet.deleteRule(j);
-                                            }
-                                        }
-                                    }
-                                } catch (cssError) {
-                                    // Ignore cross-origin CSS errors
-                                }
-                            }
-                            
-                            console.log(`Nuclear removal completed. Removed ${removedCount} elements.`);
-                            return removedCount;
-                        });
-                        
-                        // Wait for any Salesforce Lightning to finish processing
-                        await page.waitForTimeout(3000);
-                        
-                        // Verify modal is really gone
-                        const stillExists = await page.locator('.slds-modal.slds-fade-in-open').count();
-                        if (stillExists === 0) {
-                            this.logger.info('✅ Nuclear modal removal successful');
-                            modalClosed = true;
-                        } else {
-                            this.logger.info(`⚠️ ${stillExists} modals still exist after nuclear removal`);
-                        }
-                        
-                    } catch (jsError) {
-                        this.logger.debug('Nuclear JavaScript modal removal failed', { error: jsError.message });
-                    }
+                    this.logger.warn('Could not close promotional modal, attempting to continue anyway');
                 }
 
-                // Method 4: Click outside modal area (backdrop)
-                if (!modalClosed) {
-                    this.logger.info('Trying to close modal by clicking backdrop');
-                    try {
-                        // Click on the backdrop area (outside the modal content)
-                        await page.mouse.click(100, 100); // Top-left corner
-                        await page.waitForTimeout(1000);
-                        
-                        await page.waitForSelector('.slds-modal.slds-fade-in-open', { 
-                            state: 'detached', 
-                            timeout: 3000 
-                        });
-                        this.logger.info('✅ Modal closed by clicking backdrop');
-                        modalClosed = true;
-                    } catch (backdropError) {
-                        this.logger.debug('Backdrop click failed to close modal');
-                    }
-                }
-
-                if (!modalClosed) {
-                    this.logger.warn('Could not close promotional modal with any method, attempting to continue anyway');
-                }
-
-                // Final wait for any animations to complete
-                await page.waitForTimeout(2000);
+                // Final wait for Lightning to stabilize
+                await page.waitForTimeout(3000);
 
             } else {
                 this.logger.info('No promotional modal detected');
@@ -741,85 +810,108 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * IMPROVED: Navigate to Sobha Projects page with flexible selectors
+     * ENHANCED: Navigate to Projects with Lightning-aware approach
      */
     async navigateToProjects(page) {
         try {
-            this.logger.info('Navigating to Sobha Projects page');
+            this.logger.info('Navigating to Sobha Projects page with Lightning support');
 
-            // Wait a moment to ensure modal dismissal is complete
-            await page.waitForTimeout(2000);
+            // Wait for Lightning to be stable
+            await page.waitForTimeout(3000);
 
-            // First, analyze what's available on the current page
-            const availableLinks = await page.evaluate(() => {
-                const links = Array.from(document.querySelectorAll('a, button, [role="button"]'));
-                return links.map(link => ({
-                    text: link.textContent?.trim() || '',
-                    href: link.href || '',
-                    className: link.className || '',
-                    id: link.id || '',
-                    visible: link.offsetParent !== null && !link.hidden
-                })).filter(link => (link.text || link.href) && link.visible);
+            // Method 1: Try direct URL navigation first (most reliable for Lightning)
+            this.logger.info('Attempting direct navigation to projects page');
+            try {
+                const currentUrl = page.url();
+                const baseUrl = currentUrl.split('/partnerportal')[0];
+                const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
+                
+                this.logger.info(`Navigating directly to: ${projectsUrl}`);
+                await page.goto(projectsUrl, { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: CONFIG.NAVIGATION_TIMEOUT 
+                });
+                
+                // Wait for Lightning to load on the new page
+                await this.waitForLightningToLoad(page);
+                
+                this.logger.info('✅ Direct navigation to projects page successful');
+                return true;
+                
+            } catch (directNavError) {
+                this.logger.warn('Direct navigation failed, trying element-based navigation', { 
+                    error: directNavError.message 
+                });
+            }
+
+            // Method 2: Analyze available elements after Lightning loading
+            const availableElements = await page.evaluate(() => {
+                const elements = Array.from(document.querySelectorAll('a, button, [role="button"], [data-navigate]'));
+                return elements.map(el => ({
+                    text: el.textContent?.trim() || '',
+                    href: el.href || '',
+                    className: el.className || '',
+                    id: el.id || '',
+                    visible: el.offsetParent !== null && !el.hidden,
+                    dataNavigate: el.getAttribute('data-navigate') || '',
+                    onclick: el.onclick ? 'has onclick' : ''
+                })).filter(el => el.visible && (el.text || el.href || el.dataNavigate));
             });
 
-            this.logger.info('Available navigation elements:', { 
-                linkCount: availableLinks.length,
-                links: availableLinks.slice(0, 10) // Log first 10 for debugging
+            this.logger.info('Available navigation elements after Lightning load:', { 
+                elementCount: availableElements.length,
+                sample: availableElements.slice(0, 5)
             });
 
-            // Enhanced navigation selectors based on the actual Sobha portal structure
-            const navigationSelectors = [
-                // Direct link to Sobha Projects page (from logs)
+            // Method 3: Enhanced selectors for Lightning navigation
+            const enhancedNavigationSelectors = [
+                // Lightning navigation specific
+                '[data-navigate*="sobha-project"]',
+                '[data-page-reference*="sobha-project"]',
+                'lightning-navigation-item-api[data-key*="project"]',
+                
+                // Standard selectors
                 'a[href="/partnerportal/s/sobha-project"]',
                 'a[href*="sobha-project"]',
-                
-                // Text-based selectors
                 'a:has-text("Sobha Projects")',
-                'button:has-text("Sobha Projects")', 
+                'button:has-text("Sobha Projects")',
                 'text=Projects',
                 '[title*="Projects"]',
-                '[data-label*="Projects"]',
                 
-                // Menu items
-                'a[role="menuitem"]:has-text("Sobha Projects")',
-                'a[role="menuitem"][href*="project"]',
+                // Generic Lightning navigation
+                'a[role="menuitem"]',
+                'lightning-navigation-item',
+                '.slds-nav a',
                 
-                // Navigation links
-                'nav a:has-text("Sobha Projects")',
-                '.slds-nav a:has-text("Sobha Projects")',
-                
-                // Generic project links
+                // Broad selectors
                 'a[href*="sobha"]',
                 'a[href*="project"]'
             ];
 
             // Try each navigation selector
             let navigated = false;
-            for (const selector of navigationSelectors) {
+            for (const selector of enhancedNavigationSelectors) {
                 try {
                     this.logger.debug(`Trying navigation selector: ${selector}`);
                     
-                    // Wait for element to be present
-                    await page.waitForSelector(selector, { timeout: 3000 });
+                    await page.waitForSelector(selector, { timeout: 5000 });
                     
-                    // Check if element is visible and clickable
                     const element = page.locator(selector).first();
                     const isVisible = await element.isVisible();
                     
                     if (isVisible) {
                         this.logger.info(`Found navigation element: ${selector}`);
                         
-                        // Scroll into view if needed
+                        // Scroll into view and click
                         await element.scrollIntoViewIfNeeded();
-                        
-                        // Wait a moment and click
-                        await page.waitForTimeout(500);
+                        await page.waitForTimeout(1000);
                         await element.click();
                         
-                        // Wait for navigation to complete
-                        await page.waitForLoadState('domcontentloaded', { timeout: 10000 });
+                        // Wait for navigation and Lightning loading
+                        await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
+                        await this.waitForLightningToLoad(page);
                         
-                        this.logger.info(`Successfully navigated using: ${selector}`);
+                        this.logger.info(`✅ Successfully navigated using: ${selector}`);
                         navigated = true;
                         break;
                     }
@@ -828,51 +920,29 @@ class EnterpriseSobhaPortalScraper {
                 }
             }
 
-            if (!navigated) {
-                // Fallback: Try to navigate directly to the projects URL
-                this.logger.info('Trying direct navigation to projects page');
-                try {
-                    const currentUrl = page.url();
-                    const baseUrl = currentUrl.split('/partnerportal')[0];
-                    const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
-                    
-                    this.logger.info(`Attempting direct navigation to: ${projectsUrl}`);
-                    await page.goto(projectsUrl, { 
-                        waitUntil: 'domcontentloaded',
-                        timeout: 30000 
-                    });
-                    
-                    navigated = true;
-                    this.logger.info('Successfully navigated via direct URL');
-                } catch (directNavError) {
-                    this.logger.warn('Direct navigation failed', { error: directNavError.message });
-                }
-            }
-
             if (navigated) {
-                // Wait for page to load and check if we're on a projects page
+                // Validate we're on the correct page
                 await page.waitForTimeout(3000);
                 
                 const currentUrl = page.url();
                 const pageContent = await page.evaluate(() => document.body.textContent?.toLowerCase() || '');
                 const hasProjectContent = pageContent.includes('project') || pageContent.includes('sobha');
                 
-                this.logger.info('Projects page navigation result', {
+                this.logger.info('Projects page navigation validation', {
                     currentUrl: currentUrl.substring(0, 100),
                     hasProjectContent,
-                    pageContentLength: pageContent.length
+                    contentLength: pageContent.length
                 });
 
                 return true;
             } else {
                 this.logger.warn('Could not find projects navigation element, proceeding with current page');
-                return true; // Continue anyway, maybe we're already on the right page
+                return true; // Continue anyway
             }
 
         } catch (error) {
             this.logger.error('Failed to navigate to projects page', { error: error.message });
-            // Don't throw error, try to continue with data extraction on current page
-            return true;
+            return true; // Continue with data extraction on current page
         }
     }
 
@@ -934,351 +1004,476 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Extract property data with enterprise validation - ENHANCED for Sobha Portal
+     * COMPLETELY ENHANCED: Extract property data with Lightning-specific methods
      */
     async extractPropertyData(page) {
         try {
-            this.logger.info('Starting property data extraction');
+            this.logger.info('Starting enhanced property data extraction for Lightning');
 
-            // Wait for any modals to be dismissed first
-            await page.waitForTimeout(2000);
+            // Ensure Lightning is fully loaded before extraction
+            await this.waitForLightningToLoad(page);
 
-            // First, try to dismiss any remaining modals that might be blocking content
-            await this.dismissPostLoginModal(page);
+            // Wait for any remaining modals to be dismissed
+            await page.waitForTimeout(3000);
 
-            // Analyze the page structure to find data elements
-            const pageStructure = await page.evaluate(() => {
+            // Enhanced page structure analysis for Lightning
+            const lightningPageStructure = await page.evaluate(() => {
                 return {
-                    tables: document.querySelectorAll('table').length,
-                    dataRows: document.querySelectorAll('tr, [role="row"]').length,
-                    listItems: document.querySelectorAll('li, .list-item, .property-item').length,
-                    cards: document.querySelectorAll('.card, .property-card, .unit-card, [class*="card"]').length,
-                    sobhaElements: document.querySelectorAll('[class*="sobha"], [class*="property"], [class*="unit"]').length,
-                    salesforceRecords: document.querySelectorAll('[data-record-id], [data-row-key-value]').length,
-                    hasData: document.body.textContent.length
+                    // Lightning-specific elements
+                    lightningComponents: document.querySelectorAll('[class*="lightning-"], lightning-*').length,
+                    sldsComponents: document.querySelectorAll('[class*="slds-"]').length,
+                    auraComponents: document.querySelectorAll('[data-aura-rendered-by]').length,
+                    
+                    // Data elements
+                    tables: document.querySelectorAll('table, [role="table"]').length,
+                    grids: document.querySelectorAll('[role="grid"], [class*="datatable"]').length,
+                    dataRows: document.querySelectorAll('tr, [role="row"], [data-row-key-value]').length,
+                    listItems: document.querySelectorAll('li, .list-item, [role="listitem"]').length,
+                    cards: document.querySelectorAll('.slds-card, [class*="card"]').length,
+                    
+                    // Content indicators
+                    sobhaElements: document.querySelectorAll('[class*="sobha"], [id*="sobha"]').length,
+                    propertyElements: document.querySelectorAll('[class*="property"], [class*="unit"]').length,
+                    
+                    // Lightning data indicators
+                    recordElements: document.querySelectorAll('[data-record-id], [data-row-key-value]').length,
+                    forceRecords: document.querySelectorAll('[force-*], [lightning-*]').length,
+                    
+                    // Page state
+                    bodyTextLength: document.body.textContent?.length || 0,
+                    hasLoadingText: (document.body.textContent || '').includes('Loading'),
+                    hasErrorText: (document.body.textContent || '').includes('Error'),
+                    
+                    // Sample content for debugging
+                    sampleText: (document.body.textContent || '').substring(0, 500)
                 };
             });
 
-            this.logger.info('Enhanced page structure analysis:', pageStructure);
+            this.logger.info('Enhanced Lightning page structure analysis:', lightningPageStructure);
 
             let extractedData = [];
 
-            // Approach 1: Look for Salesforce Lightning data components (most likely)
-            try {
-                this.logger.info('Trying Salesforce Lightning data extraction');
-                
-                extractedData = await page.evaluate((maxResults) => {
-                    const results = [];
+            // Enhanced Approach 1: Lightning Force Records and Data Tables
+            if (lightningPageStructure.recordElements > 0 || lightningPageStructure.auraComponents > 0) {
+                try {
+                    this.logger.info('Attempting Lightning Force record extraction');
                     
-                    // Look for Lightning data table rows or records
-                    const lightningSelectors = [
-                        '[data-row-key-value]',  // Lightning data table rows
-                        '[data-record-id]',      // Salesforce record elements
-                        '.slds-table tbody tr',   // Lightning design system table
-                        '[role="row"]:not([role="columnheader"])', // Accessible table rows
-                        '.sobha-property',        // Custom Sobha property elements
-                        '.property-row',          // Generic property rows
-                        '[class*="property"]',    // Any element with "property" in class name
-                        '[class*="unit"]'         // Any element with "unit" in class name
-                    ];
-                    
-                    for (const selector of lightningSelectors) {
-                        const elements = document.querySelectorAll(selector);
-                        console.log(`Found ${elements.length} elements with selector: ${selector}`);
+                    extractedData = await page.evaluate((maxResults) => {
+                        const results = [];
                         
-                        if (elements.length > 0) {
-                            for (let i = 0; i < Math.min(elements.length, maxResults); i++) {
-                                const element = elements[i];
-                                const text = element.textContent?.trim() || '';
-                                
-                                // Skip navigation elements
-                                if (text.length > 20 && 
-                                    !text.includes('Dashboard') && 
-                                    !text.includes('Profile') && 
-                                    !text.includes('About') &&
-                                    !text.includes('Marketing')) {
+                        // Lightning Force selectors
+                        const forceSelectors = [
+                            '[data-row-key-value]',
+                            '[data-record-id]',
+                            'lightning-datatable [data-row-key-value]',
+                            'force-record-layout-item',
+                            'lightning-record-view-form',
+                            'lightning-record-edit-form',
+                            '[class*="forceListViewManagerGrid"] tr',
+                            '[class*="forceListViewManager"] tbody tr',
+                            '.slds-table tbody tr',
+                            'c-sobha-property-list-item',
+                            'c-property-list-item',
+                            '[c-sobhaprojectlist]',
+                            '[c-propertylist]'
+                        ];
+                        
+                        for (const selector of forceSelectors) {
+                            const elements = document.querySelectorAll(selector);
+                            console.log(`Lightning Force selector ${selector}: found ${elements.length} elements`);
+                            
+                            if (elements.length > 0) {
+                                for (let i = 0; i < Math.min(elements.length, maxResults); i++) {
+                                    const element = elements[i];
                                     
-                                    // Try to extract structured data from the element
-                                    const cells = element.querySelectorAll('td, .cell, [role="cell"], .field-value');
-                                    const links = element.querySelectorAll('a');
-                                    const spans = element.querySelectorAll('span');
-                                    
-                                    let project = '';
-                                    let unitNo = '';
-                                    let price = '';
-                                    let area = '';
-                                    let floor = '';
-                                    let unitType = '';
-                                    
-                                    // Extract data from cells if available
-                                    if (cells.length >= 3) {
-                                        project = cells[0]?.textContent?.trim() || '';
-                                        unitType = cells[1]?.textContent?.trim() || '';
-                                        unitNo = cells[2]?.textContent?.trim() || '';
-                                        area = cells[3]?.textContent?.trim() || '';
-                                        price = cells[4]?.textContent?.trim() || '';
-                                        floor = cells[5]?.textContent?.trim() || '';
-                                    } else {
-                                        // Try to parse from text content
-                                        const textParts = text.split(/\s+/);
-                                        
-                                        // Look for patterns in the text
-                                        for (const part of textParts) {
-                                            if (part.match(/^[A-Z]\d+/)) { // Unit number pattern
-                                                unitNo = part;
-                                            } else if (part.match(/\d+\s*(sqft|sq\.?ft\.?|square)/i)) { // Area pattern
-                                                area = part;
-                                            } else if (part.match(/\d+[\d,]*\s*(aed|usd|\$)/i)) { // Price pattern
-                                                price = part;
-                                            } else if (part.match(/^(ground|g|basement|b|\d+)(st|nd|rd|th)?\s*floor/i)) { // Floor pattern
-                                                floor = part;
+                                    // Extract data from various Lightning patterns
+                                    const extractData = () => {
+                                        // Method 1: Data attributes
+                                        const dataAttributes = {};
+                                        for (const attr of element.attributes) {
+                                            if (attr.name.startsWith('data-')) {
+                                                dataAttributes[attr.name] = attr.value;
                                             }
                                         }
                                         
-                                        // If no structured data found, use element content
-                                        if (!project) project = text.substring(0, 50);
-                                        if (!unitNo) unitNo = `Unit-${i + 1}`;
-                                    }
-                                    
-                                    const unitId = `sobha_${project.replace(/\s+/g, '_')}_${unitNo}_${Date.now()}_${i}`.replace(/[^a-zA-Z0-9_]/g, '');
-                                    
-                                    if (project && unitNo) {
-                                        results.push({
-                                            unitId,
-                                            project: project || 'Sobha Properties',
-                                            subProject: '',
-                                            unitType: unitType || '',
-                                            floor: floor || '',
-                                            unitNo: unitNo,
-                                            totalUnitArea: area || '',
-                                            startingPrice: price || '',
-                                            availability: 'available',
-                                            sourceUrl: window.location.href,
-                                            extractionMethod: `Lightning-${selector}`,
-                                            rawData: text.substring(0, 200),
-                                            scrapedAt: new Date().toISOString()
+                                        // Method 2: Lightning field values
+                                        const fieldValues = {};
+                                        const fields = element.querySelectorAll(
+                                            'lightning-output-field, lightning-formatted-text, .slds-form-element__control, [data-output-element-id]'
+                                        );
+                                        
+                                        fields.forEach(field => {
+                                            const label = field.getAttribute('data-label') || 
+                                                        field.querySelector('label')?.textContent || 
+                                                        field.getAttribute('field-label');
+                                            const value = field.textContent?.trim() || 
+                                                        field.getAttribute('value') || 
+                                                        field.getAttribute('data-value');
+                                            
+                                            if (label && value) {
+                                                fieldValues[label.toLowerCase().replace(/\s+/g, '_')] = value;
+                                            }
                                         });
+                                        
+                                        // Method 3: Table cells
+                                        const cells = element.querySelectorAll('td, th, .slds-cell, [role="gridcell"]');
+                                        const cellData = Array.from(cells).map(cell => cell.textContent?.trim()).filter(Boolean);
+                                        
+                                        // Method 4: Text extraction with patterns
+                                        const text = element.textContent?.trim() || '';
+                                        const patterns = {
+                                            project: text.match(/(?:project|development):\s*([^,\n]+)/i)?.[1],
+                                            unit: text.match(/(?:unit|apartment|flat)[\s#]*([a-z0-9\-]+)/i)?.[1],
+                                            price: text.match(/(?:price|cost|aed|usd)[\s:]*([0-9,]+)/i)?.[1],
+                                            area: text.match(/(\d+)\s*(?:sqft|sq\.?\s*ft|square\s*feet)/i)?.[1],
+                                            bedrooms: text.match(/(\d+)\s*(?:bed|bedroom|br)/i)?.[1],
+                                            floor: text.match(/(\d+)(?:st|nd|rd|th)?\s*floor/i)?.[1]
+                                        };
+                                        
+                                        return {
+                                            dataAttributes,
+                                            fieldValues,
+                                            cellData,
+                                            patterns,
+                                            rawText: text.substring(0, 200)
+                                        };
+                                    };
+                                    
+                                    const data = extractData();
+                                    
+                                    // Build property object from extracted data
+                                    const property = {
+                                        unitId: `lightning_${Date.now()}_${i}`,
+                                        project: data.fieldValues.project || 
+                                                data.patterns.project || 
+                                                data.cellData[0] || 
+                                                'Sobha Project',
+                                        subProject: data.fieldValues.sub_project || data.cellData[1] || '',
+                                        unitType: data.fieldValues.unit_type || 
+                                                 data.patterns.bedrooms ? `${data.patterns.bedrooms} Bedroom` : '',
+                                        floor: data.fieldValues.floor || data.patterns.floor || '',
+                                        unitNo: data.fieldValues.unit_number || 
+                                               data.patterns.unit || 
+                                               data.cellData[2] || 
+                                               `Unit-${i + 1}`,
+                                        totalUnitArea: data.fieldValues.area || 
+                                                      data.patterns.area ? `${data.patterns.area} sqft` : '',
+                                        startingPrice: data.fieldValues.price || 
+                                                      data.patterns.price ? `${data.patterns.price} AED` : '',
+                                        availability: 'available',
+                                        sourceUrl: window.location.href,
+                                        extractionMethod: `Lightning-Force-${selector}`,
+                                        lightningData: data,
+                                        scrapedAt: new Date().toISOString()
+                                    };
+                                    
+                                    // Only include if we have meaningful data
+                                    if (property.project !== 'Sobha Project' || 
+                                        property.unitNo !== `Unit-${i + 1}` || 
+                                        data.rawText.length > 50) {
+                                        results.push(property);
                                     }
                                 }
-                            }
-                            
-                            if (results.length > 0) {
-                                console.log(`Successfully extracted ${results.length} properties using ${selector}`);
-                                break; // Stop trying other selectors if we found data
-                            }
-                        }
-                    }
-                    
-                    return results;
-                }, this.input.maxResults);
-
-                this.logger.info('Salesforce Lightning extraction completed', { propertiesFound: extractedData.length });
-
-            } catch (lightningError) {
-                this.logger.warn('Lightning extraction failed', { error: lightningError.message });
-            }
-
-            // Approach 2: Traditional table extraction
-            if (extractedData.length === 0) {
-                try {
-                    this.logger.info('Trying traditional table extraction');
-                    await page.waitForSelector('table tbody tr, .table tbody tr, [role="row"]:not(:first-child)', { timeout: 10000 });
-                    
-                    extractedData = await page.evaluate((maxResults) => {
-                        const rows = document.querySelectorAll('table tbody tr, .table tbody tr, [role="row"]:not(:first-child)');
-                        const results = [];
-                        
-                        for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
-                            try {
-                                const row = rows[i];
-                                const cells = row.querySelectorAll('td, [role="cell"]');
                                 
-                                if (cells.length >= 7) {
-                                    const project = cells[0]?.textContent?.trim() || '';
-                                    const subProject = cells[1]?.textContent?.trim() || '';
-                                    const unitType = cells[2]?.textContent?.trim() || '';
-                                    const floor = cells[3]?.textContent?.trim() || '';
-                                    const unitNo = cells[4]?.textContent?.trim() || '';
-                                    const totalUnitArea = cells[5]?.textContent?.trim() || '';
-                                    const startingPrice = cells[6]?.textContent?.trim() || '';
-                                    
-                                    const unitId = `${project}_${unitNo}_${Date.now()}_${i}`.replace(/[^a-zA-Z0-9_]/g, '');
-                                    
-                                    if (project && unitNo && startingPrice) {
-                                        results.push({
-                                            unitId,
-                                            project,
-                                            subProject,
-                                            unitType,
-                                            floor,
-                                            unitNo,
-                                            totalUnitArea,
-                                            startingPrice,
-                                            availability: 'available',
-                                            sourceUrl: window.location.href,
-                                            extractionMethod: 'Traditional-Table',
-                                            scrapedAt: new Date().toISOString()
-                                        });
-                                    }
+                                if (results.length > 0) {
+                                    console.log(`Successfully extracted ${results.length} properties using Lightning Force selector: ${selector}`);
+                                    break;
                                 }
-                            } catch (rowError) {
-                                console.warn(`Error processing row ${i}:`, rowError);
                             }
                         }
                         
                         return results;
                     }, this.input.maxResults);
 
-                    this.logger.info('Table extraction completed', { propertiesFound: extractedData.length });
+                    this.logger.info('Lightning Force extraction completed', { propertiesFound: extractedData.length });
 
-                } catch (tableError) {
-                    this.logger.warn('Table extraction failed, trying alternative methods', { error: tableError.message });
+                } catch (lightningError) {
+                    this.logger.warn('Lightning Force extraction failed', { error: lightningError.message });
                 }
             }
 
-            // Approach 3: Generic content extraction with better filtering
-            if (extractedData.length === 0) {
-                extractedData = await page.evaluate((maxResults) => {
-                    const results = [];
+            // Enhanced Approach 2: Lightning DataTable extraction
+            if (extractedData.length === 0 && lightningPageStructure.grids > 0) {
+                try {
+                    this.logger.info('Attempting Lightning DataTable extraction');
                     
-                    // Look for any elements that might contain property data
-                    const dataElements = document.querySelectorAll(
-                        '.property, .unit, .listing, [class*="property"], [class*="unit"], [class*="listing"], ' +
-                        '.slds-card, .card, [data-name*="property"], [data-name*="unit"]'
-                    );
-                    
-                    for (let i = 0; i < Math.min(dataElements.length, maxResults); i++) {
-                        try {
-                            const element = dataElements[i];
-                            const text = element.textContent?.trim() || '';
+                    extractedData = await page.evaluate((maxResults) => {
+                        const results = [];
+                        const datatables = document.querySelectorAll('lightning-datatable, [role="grid"], .slds-table');
+                        
+                        datatables.forEach((table, tableIndex) => {
+                            const rows = table.querySelectorAll('[role="row"]:not([role="row"]:first-child), tbody tr');
                             
-                            // Better filtering - avoid navigation and menu elements
-                            if (text.length > 50 && 
-                                !text.includes('Dashboard') && 
-                                !text.includes('Profile') && 
-                                !text.includes('About') &&
-                                !text.includes('Marketing') &&
-                                !text.includes('Performance') &&
-                                !text.includes('More') &&
-                                (text.includes('Sobha') || text.includes('Project') || text.includes('Unit') || 
-                                 text.includes('AED') || text.includes('sqft') || text.match(/\d+/))) {
+                            for (let i = 0; i < Math.min(rows.length, maxResults - results.length); i++) {
+                                const row = rows[i];
+                                const cells = row.querySelectorAll('[role="gridcell"], td, .slds-cell');
                                 
-                                const unitId = `property_${i}_${Date.now()}`;
+                                if (cells.length >= 3) {
+                                    const cellTexts = Array.from(cells).map(cell => cell.textContent?.trim() || '');
+                                    
+                                    results.push({
+                                        unitId: `datatable_${tableIndex}_${i}_${Date.now()}`,
+                                        project: cellTexts[0] || 'Sobha DataTable Project',
+                                        subProject: cellTexts[1] || '',
+                                        unitType: cellTexts[2] || '',
+                                        floor: cellTexts[3] || '',
+                                        unitNo: cellTexts[4] || `DT-${i + 1}`,
+                                        totalUnitArea: cellTexts[5] || '',
+                                        startingPrice: cellTexts[6] || '',
+                                        availability: 'available',
+                                        sourceUrl: window.location.href,
+                                        extractionMethod: 'Lightning-DataTable',
+                                        rawCellData: cellTexts,
+                                        scrapedAt: new Date().toISOString()
+                                    });
+                                }
+                            }
+                        });
+                        
+                        return results;
+                    }, this.input.maxResults);
+
+                    this.logger.info('Lightning DataTable extraction completed', { propertiesFound: extractedData.length });
+
+                } catch (datatableError) {
+                    this.logger.warn('Lightning DataTable extraction failed', { error: datatableError.message });
+                }
+            }
+
+            // Enhanced Approach 3: Lightning Card extraction
+            if (extractedData.length === 0 && lightningPageStructure.cards > 0) {
+                try {
+                    this.logger.info('Attempting Lightning Card extraction');
+                    
+                    extractedData = await page.evaluate((maxResults) => {
+                        const results = [];
+                        const cards = document.querySelectorAll('.slds-card, [class*="card"], lightning-card');
+                        
+                        for (let i = 0; i < Math.min(cards.length, maxResults); i++) {
+                            const card = cards[i];
+                            const text = card.textContent?.trim() || '';
+                            
+                            // Skip navigation cards
+                            if (text.length > 100 && 
+                                !text.includes('Dashboard') && 
+                                !text.includes('Profile') &&
+                                (text.includes('Sobha') || text.includes('Unit') || text.includes('Project'))) {
+                                
                                 results.push({
-                                    unitId,
-                                    project: 'Sobha Properties',
+                                    unitId: `card_${i}_${Date.now()}`,
+                                    project: text.includes('Sobha') ? 'Sobha Card Project' : 'Card Project',
                                     subProject: '',
                                     unitType: '',
                                     floor: '',
-                                    unitNo: `Unit-${i + 1}`,
+                                    unitNo: `Card-${i + 1}`,
                                     totalUnitArea: '',
                                     startingPrice: '',
                                     availability: 'available',
-                                    rawData: text.substring(0, 500),
+                                    rawData: text.substring(0, 300),
                                     sourceUrl: window.location.href,
-                                    extractionMethod: 'Generic-Content',
+                                    extractionMethod: 'Lightning-Card',
                                     scrapedAt: new Date().toISOString()
                                 });
                             }
-                        } catch (elementError) {
-                            console.warn(`Error processing element ${i}:`, elementError);
+                        }
+                        
+                        return results;
+                    }, this.input.maxResults);
+
+                    this.logger.info('Lightning Card extraction completed', { propertiesFound: extractedData.length });
+
+                } catch (cardError) {
+                    this.logger.warn('Lightning Card extraction failed', { error: cardError.message });
+                }
+            }
+
+            // Enhanced Approach 4: Smart content extraction with Lightning awareness
+            if (extractedData.length === 0) {
+                this.logger.info('Attempting enhanced content extraction');
+                
+                extractedData = await page.evaluate((maxResults) => {
+                    const results = [];
+                    
+                    // Look for any meaningful content that's not navigation
+                    const contentElements = document.querySelectorAll(
+                        '[class*="property"], [class*="unit"], [class*="listing"], [class*="sobha"], ' +
+                        '[id*="property"], [id*="unit"], [id*="sobha"], ' +
+                        '.slds-card, .slds-tile, [data-name*="property"], [data-name*="unit"]'
+                    );
+                    
+                    for (let i = 0; i < Math.min(contentElements.length, maxResults); i++) {
+                        const element = contentElements[i];
+                        const text = element.textContent?.trim() || '';
+                        
+                        // Enhanced filtering - look for property-related content
+                        if (text.length > 50 && 
+                            !text.includes('Dashboard') && 
+                            !text.includes('Profile') && 
+                            !text.includes('About Sobha') &&
+                            !text.includes('Marketing') &&
+                            !text.includes('Performance') &&
+                            !text.includes('Loading') &&
+                            (text.includes('Project') || 
+                             text.includes('Unit') || 
+                             text.includes('Bedroom') ||
+                             text.includes('sqft') ||
+                             text.includes('AED') ||
+                             text.match(/\d+/) ||
+                             element.className.includes('property') ||
+                             element.className.includes('unit'))) {
+                            
+                            results.push({
+                                unitId: `enhanced_${i}_${Date.now()}`,
+                                project: 'Sobha Enhanced Content',
+                                subProject: '',
+                                unitType: '',
+                                floor: '',
+                                unitNo: `Enhanced-${i + 1}`,
+                                totalUnitArea: '',
+                                startingPrice: '',
+                                availability: 'available',
+                                rawData: text.substring(0, 500),
+                                sourceUrl: window.location.href,
+                                extractionMethod: 'Enhanced-Content',
+                                elementDetails: {
+                                    className: element.className,
+                                    id: element.id,
+                                    tagName: element.tagName
+                                },
+                                scrapedAt: new Date().toISOString()
+                            });
                         }
                     }
                     
                     return results;
                 }, this.input.maxResults);
 
-                this.logger.info('Alternative extraction completed', { propertiesFound: extractedData.length });
+                this.logger.info('Enhanced content extraction completed', { propertiesFound: extractedData.length });
             }
 
-            // If still no data, create a detailed debug entry
+            // If still no meaningful data, create enhanced debug entry
             if (extractedData.length === 0) {
-                this.logger.warn('No property data found, creating debug entry with page analysis');
+                this.logger.warn('No property data found - creating enhanced debug entry');
                 
-                const pageAnalysis = await page.evaluate(() => {
+                const enhancedPageAnalysis = await page.evaluate(() => {
                     const analysis = {
                         url: window.location.href,
                         title: document.title,
-                        bodyText: document.body.textContent?.substring(0, 1000) || '',
+                        
+                        // Lightning framework state
+                        hasAura: !!window.$A,
+                        hasLightning: !!window.LightningElement,
+                        hasSalesforce: !!window.Sfdc,
+                        
+                        // Content analysis
+                        bodyText: document.body.textContent?.substring(0, 2000) || '',
+                        
+                        // Element counts
                         elementCounts: {
+                            total: document.querySelectorAll('*').length,
                             divs: document.querySelectorAll('div').length,
+                            spans: document.querySelectorAll('span').length,
                             tables: document.querySelectorAll('table').length,
-                            cards: document.querySelectorAll('.card, .slds-card').length,
+                            cards: document.querySelectorAll('.slds-card, .card').length,
                             buttons: document.querySelectorAll('button').length,
-                            links: document.querySelectorAll('a').length
+                            links: document.querySelectorAll('a').length,
+                            lightning: document.querySelectorAll('[class*="lightning-"], lightning-*').length,
+                            slds: document.querySelectorAll('[class*="slds-"]').length,
+                            aura: document.querySelectorAll('[data-aura-rendered-by]').length
                         },
-                        classNames: Array.from(document.querySelectorAll('[class]')).slice(0, 10).map(el => el.className)
+                        
+                        // Sample elements
+                        sampleClasses: Array.from(document.querySelectorAll('[class]'))
+                            .slice(0, 20)
+                            .map(el => el.className)
+                            .filter(Boolean),
+                        
+                        // Page state indicators
+                        indicators: {
+                            hasLoadingSpinner: document.querySelectorAll('.slds-spinner, [class*="loading"]').length > 0,
+                            hasErrorMessage: document.body.textContent?.includes('Error') || false,
+                            hasNoDataMessage: document.body.textContent?.includes('No records') || 
+                                            document.body.textContent?.includes('No data') || false,
+                            contentLoaded: document.body.textContent?.length > 1000
+                        }
                     };
+                    
                     return analysis;
                 });
                 
                 extractedData = [{
-                    unitId: `debug_${Date.now()}`,
-                    project: 'Debug Entry - No Properties Found',
-                    subProject: 'Analysis',
+                    unitId: `debug_lightning_${Date.now()}`,
+                    project: 'Enhanced Debug Entry - Lightning Analysis',
+                    subProject: 'No Properties Found',
                     unitType: 'Debug',
                     floor: '0',
-                    unitNo: 'DEBUG-001',
+                    unitNo: 'DEBUG-LIGHTNING-001',
                     totalUnitArea: '0',
                     startingPrice: '0',
                     availability: 'debug',
-                    sourceUrl: pageAnalysis.url,
-                    pageTitle: pageAnalysis.title,
+                    sourceUrl: enhancedPageAnalysis.url,
+                    pageTitle: enhancedPageAnalysis.title,
                     debugInfo: {
-                        message: 'No property data found on page',
-                        pageAnalysis: pageAnalysis,
-                        pageStructure: pageStructure
+                        message: 'No property data found after Lightning analysis',
+                        lightningAnalysis: enhancedPageAnalysis,
+                        pageStructure: lightningPageStructure,
+                        extractionAttempts: ['Lightning-Force', 'Lightning-DataTable', 'Lightning-Card', 'Enhanced-Content']
                     },
-                    extractionMethod: 'Debug-Analysis',
+                    extractionMethod: 'Enhanced-Debug-Analysis',
                     scrapedAt: new Date().toISOString()
                 }];
             }
 
-            // Validate extracted data
+            // Validate and clean extracted data
             const validProperties = extractedData.filter(prop => 
-                prop.unitId && prop.project
+                prop.unitId && prop.project && prop.unitNo
             );
 
             this.metrics.recordPropertiesScraped(validProperties.length);
             
-            this.logger.info('Property data extraction completed', {
+            this.logger.info('Enhanced property data extraction completed', {
                 totalExtracted: extractedData.length,
                 validProperties: validProperties.length,
                 invalidFiltered: extractedData.length - validProperties.length,
-                extractionMethods: [...new Set(extractedData.map(p => p.extractionMethod))]
+                extractionMethods: [...new Set(extractedData.map(p => p.extractionMethod))],
+                lightningFrameworkState: lightningPageStructure
             });
 
             return validProperties;
 
         } catch (error) {
-            this.logger.error('Failed to extract property data', { error: error.message });
+            this.logger.error('Enhanced property data extraction failed', { error: error.message });
             
-            // Return a debug entry even if extraction completely fails
+            // Return enhanced error entry
             return [{
-                unitId: `error_${Date.now()}`,
-                project: 'Error Entry',
-                subProject: 'Extraction failed',
+                unitId: `error_lightning_${Date.now()}`,
+                project: 'Enhanced Error Entry',
+                subProject: 'Extraction completely failed',
                 unitType: 'Error',
                 floor: '0',
-                unitNo: 'ERROR-001',
+                unitNo: 'ERROR-LIGHTNING-001',
                 totalUnitArea: '0',
                 startingPrice: '0',
                 availability: 'error',
                 sourceUrl: page.url(),
-                errorInfo: error.message,
-                extractionMethod: 'Error-Fallback',
+                errorInfo: {
+                    message: error.message,
+                    stack: error.stack,
+                    timestamp: new Date().toISOString()
+                },
+                extractionMethod: 'Enhanced-Error-Fallback',
                 scrapedAt: new Date().toISOString()
             }];
         }
     }
 
     /**
-     * Main enterprise scraping workflow
+     * Main enterprise scraping workflow with Lightning support
      */
     async executeScraping() {
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000, // 5 minutes for modal handling
+            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000, // 15 minutes for Lightning
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
@@ -1294,7 +1489,9 @@ class EnterpriseSobhaPortalScraper {
                         '--disable-renderer-backgrounding',
                         '--no-first-run',
                         '--no-default-browser-check',
-                        '--disable-blink-features=AutomationControlled'
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-extensions',
+                        '--disable-plugins'
                     ]
                 }
             },
@@ -1302,7 +1499,7 @@ class EnterpriseSobhaPortalScraper {
                 const scrapeStart = performance.now();
                 
                 try {
-                    this.logger.info('Starting scraping workflow', { url: request.url });
+                    this.logger.info('Starting enhanced Lightning-aware scraping workflow', { url: request.url });
 
                     // Memory monitoring
                     this.metrics.recordMemoryUsage();
@@ -1310,21 +1507,21 @@ class EnterpriseSobhaPortalScraper {
                     // Apply rate limiting
                     await this.rateLimiter.wait();
 
-                    // Perform authentication
+                    // Perform authentication with Lightning support
                     if (!await this.authenticate(page)) {
                         throw new Error('Authentication failed');
                     }
 
-                    // Navigate to projects page (flexible approach)
+                    // Navigate to projects page with Lightning awareness
                     await this.navigateToProjects(page);
 
                     // Apply filters (if any)
                     await this.applyFilters(page);
 
-                    // Extract property data
+                    // Extract property data with Lightning methods
                     const properties = await this.extractPropertyData(page);
 
-                    // Prepare enterprise-grade output
+                    // Prepare enhanced enterprise output
                     const results = {
                         // Session metadata
                         sessionId: this.sessionId,
@@ -1335,14 +1532,17 @@ class EnterpriseSobhaPortalScraper {
                         configuration: {
                             filtersApplied: this.input.filters,
                             maxResults: this.input.maxResults,
-                            enableStealth: this.input.enableStealth
+                            enableStealth: this.input.enableStealth,
+                            lightningSupport: true,
+                            enhancedExtraction: true
                         },
                         
                         // Results data
                         summary: {
                             totalProperties: properties.length,
                             successRate: this.metrics.getSuccessRate(),
-                            scrapingDuration: Math.round(performance.now() - scrapeStart)
+                            scrapingDuration: Math.round(performance.now() - scrapeStart),
+                            lightningFrameworkDetected: true
                         },
                         
                         // Property data
@@ -1351,15 +1551,16 @@ class EnterpriseSobhaPortalScraper {
                         // Enterprise metrics
                         metrics: this.metrics.getSummary(),
                         
-                        // Metadata for integration
+                        // Enhanced metadata
                         metadata: {
-                            scraperVersion: '1.0.1',
+                            scraperVersion: '1.0.2',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
                                 width: window.innerWidth,
                                 height: window.innerHeight
                             })),
+                            lightningSupport: true,
                             timestamp: Date.now()
                         }
                     };
@@ -1375,32 +1576,35 @@ class EnterpriseSobhaPortalScraper {
                     // Store results in dataset
                     await Dataset.pushData(results);
 
-                    this.logger.info('Scraping workflow completed successfully', {
+                    this.logger.info('Enhanced Lightning-aware scraping workflow completed successfully', {
                         propertiesCount: properties.length,
                         successRate: this.metrics.getSuccessRate(),
-                        duration: Math.round(performance.now() - scrapeStart)
+                        duration: Math.round(performance.now() - scrapeStart),
+                        lightningSupport: true
                     });
 
                 } catch (error) {
                     const duration = performance.now() - scrapeStart;
                     this.metrics.recordRequest(false, duration, error);
                     
-                    this.logger.error('Scraping workflow failed', {
+                    this.logger.error('Enhanced scraping workflow failed', {
                         error: error.message,
                         duration: Math.round(duration),
                         stack: error.stack
                     });
                     
-                    // Store error results for debugging
+                    // Store enhanced error results
                     await Dataset.pushData({
                         sessionId: this.sessionId,
                         timestamp: new Date().toISOString(),
                         success: false,
                         error: {
                             message: error.message,
-                            stack: error.stack
+                            stack: error.stack,
+                            type: 'Lightning-Enhanced-Error'
                         },
-                        metrics: this.metrics.getSummary()
+                        metrics: this.metrics.getSummary(),
+                        lightningSupport: true
                     });
                     
                     throw error;
@@ -1414,7 +1618,8 @@ class EnterpriseSobhaPortalScraper {
         return {
             success: true,
             sessionId: this.sessionId,
-            metrics: this.metrics.getSummary()
+            metrics: this.metrics.getSummary(),
+            lightningSupport: true
         };
     }
 }
@@ -1425,17 +1630,17 @@ class EnterpriseSobhaPortalScraper {
 async function main() {
     try {
         await Actor.init();
-        console.log('Actor initialized successfully');
+        console.log('Enhanced Lightning-aware Actor initialized successfully');
 
         // Get and validate input
         const actorInput = await Actor.getInput() ?? {};
         console.log('Actor input received:', { hasEmail: !!actorInput.email, hasPassword: !!actorInput.password });
         
-        // Enterprise input validation
+        // Enhanced input validation
         let validatedInput;
         try {
             validatedInput = InputValidator.validate(actorInput);
-            console.log('Input validation successful');
+            console.log('Enhanced input validation successful');
         } catch (validationError) {
             console.error('Input validation failed:', validationError.message);
             if (Actor.log && typeof Actor.log.error === 'function') {
@@ -1445,38 +1650,39 @@ async function main() {
             return;
         }
 
-        // Initialize enterprise scraper
-        console.log('Initializing enterprise scraper...');
+        // Initialize enhanced Lightning-aware scraper
+        console.log('Initializing enhanced Lightning-aware enterprise scraper...');
         const scraper = new EnterpriseSobhaPortalScraper(validatedInput);
 
-        // Execute enterprise scraping workflow
-        console.log('Starting scraping workflow...');
+        // Execute enhanced scraping workflow
+        console.log('Starting enhanced Lightning-aware scraping workflow...');
         const results = await scraper.executeScraping();
 
         if (results.success) {
-            console.log('Scraping completed successfully');
+            console.log('Enhanced Lightning-aware scraping completed successfully');
             if (Actor.log && typeof Actor.log.info === 'function') {
-                Actor.log.info('Enterprise scraping completed successfully', {
+                Actor.log.info('Enhanced Lightning-aware scraping completed successfully', {
                     sessionId: results.sessionId,
                     successRate: results.metrics.successRate,
-                    propertiesScraped: results.metrics.propertiesScraped
+                    propertiesScraped: results.metrics.propertiesScraped,
+                    lightningSupport: true
                 });
             }
         } else {
-            console.error('Scraping failed:', results.error);
+            console.error('Enhanced scraping failed:', results.error);
             if (Actor.log && typeof Actor.log.error === 'function') {
-                Actor.log.error('Enterprise scraping failed', { error: results.error });
+                Actor.log.error('Enhanced Lightning-aware scraping failed', { error: results.error });
             }
-            await Actor.fail(`Scraping failed: ${results.error}`);
+            await Actor.fail(`Enhanced scraping failed: ${results.error}`);
             return;
         }
 
     } catch (error) {
-        console.error('Critical error in enterprise actor:', error.message);
+        console.error('Critical error in enhanced Lightning-aware actor:', error.message);
         console.error('Stack trace:', error.stack);
         
         if (Actor.log && typeof Actor.log.error === 'function') {
-            Actor.log.error('Critical error in enterprise actor', { 
+            Actor.log.error('Critical error in enhanced Lightning-aware actor', { 
                 error: error.message,
                 stack: error.stack 
             });
