@@ -40,7 +40,7 @@ const CONFIG = {
         email: 'input[placeholder="name@example.com"], input[type="email"], textbox, input[name*="email"]',
         password: 'input[type="password"], textbox:has-text("Password"), input[placeholder*="password"]',
         loginButton: 'button:has-text("Sign in")',
-        dashboardIndicator: 'text=BARACA LIFE CAPITAL REAL ESTATE, text=Dashboard, text=My Dashboard, text=Sobha Projects',
+        dashboardIndicator: 'text=Sobha Projects, a:has-text("Sobha Projects"), button:has-text("Sobha Projects"), text=Projects, body',
         projectsNavigation: 'text=Sobha Projects, a:has-text("Sobha Projects"), button:has-text("Sobha Projects")',
         filterBed: 'text=Select Bed',
         filterArea: 'text=Select Area (SQ. FT.)',
