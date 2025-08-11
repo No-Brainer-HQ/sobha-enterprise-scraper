@@ -556,7 +556,7 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Navigate to projects page and open property modal
+     * Navigate to projects page and wait for Lightning components to render
      */
     async navigateToProjects(page) {
         try {
@@ -578,11 +578,11 @@ class EnterpriseSobhaPortalScraper {
                     timeout: CONFIG.NAVIGATION_TIMEOUT 
                 });
                 
-                // Wait for page content to load
-                this.logger.info(`Waiting ${CONFIG.CONTENT_WAIT}ms for projects page to load`);
-                await page.waitForTimeout(CONFIG.CONTENT_WAIT);
+                // CRITICAL: Wait for Lightning components to render
+                this.logger.info('Waiting for Lightning components to render');
+                await this.waitForLightningComponentsToRender(page);
                 
-                this.logger.info('✅ Direct navigation to projects page successful');
+                this.logger.info('✅ Direct navigation and Lightning rendering completed');
                 return true;
                 
             } catch (directNavError) {
@@ -597,83 +597,275 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * CRITICAL NEW METHOD: Open property modal by clicking Filter Properties
+     * NEW: Wait for Lightning components to fully render
+     */
+    async waitForLightningComponentsToRender(page) {
+        try {
+            this.logger.info('Waiting for Lightning components to fully render');
+
+            // Step 1: Wait for the main Lightning component to appear
+            this.logger.debug('Waiting for main Lightning component');
+            await page.waitForFunction(() => {
+                // Wait for the specific Sobha projects component
+                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
+                if (sobhaComponent) {
+                    console.log('Sobha Lightning component found');
+                    return true;
+                }
+                
+                // Also check for general Lightning content
+                const lightningContent = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
+                console.log(`Found ${lightningContent.length} Lightning elements`);
+                return lightningContent.length > 50; // Substantial Lightning content
+            }, {}, { timeout: 30000 });
+
+            // Step 2: Wait for UI elements to be rendered inside the component
+            this.logger.debug('Waiting for UI content to render inside Lightning components');
+            await page.waitForFunction(() => {
+                // Check for any buttons or interactive elements
+                const buttons = document.querySelectorAll('button');
+                const inputs = document.querySelectorAll('input');
+                const clickables = document.querySelectorAll('[onclick], [role="button"]');
+                
+                const totalInteractive = buttons.length + inputs.length + clickables.length;
+                console.log(`Found ${totalInteractive} interactive elements`);
+                
+                // Also check for specific filter-related content
+                const bodyText = document.body.textContent || '';
+                const hasFilterContent = bodyText.includes('Filter') || bodyText.includes('Properties') || bodyText.includes('Search');
+                
+                console.log(`Has filter content: ${hasFilterContent}`);
+                console.log(`Total interactive elements: ${totalInteractive}`);
+                
+                return totalInteractive >= 5 && hasFilterContent;
+            }, {}, { timeout: 45000 });
+
+            // Step 3: Additional wait for any final rendering
+            this.logger.debug('Allowing extra time for final component rendering');
+            await page.waitForTimeout(5000);
+
+            // Step 4: Verify components are ready
+            const componentStatus = await page.evaluate(() => {
+                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
+                const buttons = document.querySelectorAll('button');
+                const bodyText = document.body.textContent || '';
+                
+                return {
+                    hasSobhaComponent: !!sobhaComponent,
+                    buttonCount: buttons.length,
+                    hasFilterText: bodyText.includes('Filter'),
+                    hasPropertiesText: bodyText.includes('Properties'),
+                    contentLength: bodyText.length
+                };
+            });
+
+            this.logger.info('Lightning component rendering completed', componentStatus);
+
+            if (componentStatus.buttonCount === 0) {
+                throw new Error('No buttons found after Lightning rendering - components may not have loaded properly');
+            }
+
+            return true;
+
+        } catch (error) {
+            this.logger.error('Lightning component rendering failed', { error: error.message });
+            
+            // Don't fail completely - log the issue but continue
+            this.logger.warn('Continuing despite Lightning rendering issues');
+            await page.waitForTimeout(10000); // Extra wait as fallback
+            return false;
+        }
+    }
+
+    /**
+     * ENHANCED: Open property modal with Lightning component awareness
      */
     async openPropertyModal(page) {
         try {
-            this.logger.info('Opening property listings modal');
+            this.logger.info('Opening property listings modal with Lightning awareness');
 
-            // Wait for page to be ready
+            // Wait for Lightning components to be fully interactive
             await page.waitForTimeout(3000);
 
+            // DEBUGGING: Analyze what's actually on the page AFTER Lightning rendering
+            this.logger.info('Analyzing page content after Lightning rendering');
+            const pageAnalysis = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const inputs = Array.from(document.querySelectorAll('input'));
+                const allClickables = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [onclick], [role="button"]'));
+                
+                // Look specifically for Lightning component content
+                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
+                const lightningElements = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
+                
+                return {
+                    totalButtons: buttons.length,
+                    totalInputs: inputs.length,
+                    totalClickables: allClickables.length,
+                    hasSobhaComponent: !!sobhaComponent,
+                    lightningElementCount: lightningElements.length,
+                    buttonTexts: buttons.map(btn => btn.textContent?.trim()).filter(text => text && text.length > 0),
+                    inputValues: inputs.map(inp => inp.value?.trim() || inp.placeholder?.trim()).filter(text => text && text.length > 0),
+                    clickableTexts: allClickables.map(el => el.textContent?.trim() || el.value?.trim() || el.getAttribute('aria-label')).filter(text => text && text.length > 0),
+                    pageText: document.body.textContent?.includes('Filter') ? 'Contains Filter text' : 'No Filter text found',
+                    pageTitle: document.title,
+                    currentUrl: window.location.href,
+                    
+                    // Sample of actual button elements for debugging
+                    buttonSample: buttons.slice(0, 5).map(btn => ({
+                        text: btn.textContent?.trim(),
+                        value: btn.value,
+                        className: btn.className,
+                        id: btn.id,
+                        type: btn.type,
+                        visible: btn.offsetParent !== null
+                    }))
+                };
+            });
+
+            this.logger.info('Lightning-aware page analysis completed', pageAnalysis);
+
             // Find and click the "Filter Properties" button
-            this.logger.info('Looking for "Filter Properties" button');
+            this.logger.info('Looking for Filter Properties button with Lightning awareness');
             
             try {
-                // Wait for the button to be present and visible
-                await page.waitForSelector(CONFIG.SELECTORS.filterPropertiesButton, { 
-                    timeout: 15000,
-                    state: 'visible'
-                });
+                // Enhanced selector targeting Lightning-rendered content
+                const lightningFilterSelectors = [
+                    // Standard button text
+                    'button:has-text("Filter Properties")',
+                    
+                    // Lightning-specific button selectors
+                    'lightning-button:has-text("Filter Properties")',
+                    'lightning-button:has-text("Filter")',
+                    
+                    // Aura component buttons
+                    '[data-aura-class*="button"]:has-text("Filter")',
+                    
+                    // SLDS (Salesforce Lightning Design System) buttons
+                    '.slds-button:has-text("Filter")',
+                    '.slds-button:has-text("Properties")',
+                    
+                    // Generic Lightning buttons with filter text
+                    'button:has-text("Filter")',
+                    'button:has-text("Apply")',
+                    'button:has-text("Search")',
+                    
+                    // Try different case variations
+                    'button:has-text("FILTER PROPERTIES")',
+                    'button:has-text("filter properties")',
+                    'button:has-text("Apply Filter")',
+                    'button:has-text("Search Properties")'
+                ];
 
-                this.logger.info('Found "Filter Properties" button, clicking it');
-                
-                // Click the button
-                await page.click(CONFIG.SELECTORS.filterPropertiesButton);
-                
-                // Wait for modal to appear
-                this.logger.info('Waiting for property modal to load');
-                await page.waitForSelector(CONFIG.SELECTORS.propertyModal, { 
-                    timeout: CONFIG.MODAL_WAIT,
-                    state: 'visible'
-                });
+                let buttonFound = false;
+                for (const selector of lightningFilterSelectors) {
+                    try {
+                        this.logger.debug(`Trying Lightning selector: ${selector}`);
+                        
+                        // Wait for the element with a reasonable timeout
+                        await page.waitForSelector(selector, { 
+                            timeout: 5000,
+                            state: 'visible'
+                        });
 
-                // Additional wait for modal content to load
-                await page.waitForTimeout(3000);
+                        this.logger.info(`Found button with Lightning selector: ${selector}`);
+                        
+                        // Click the button
+                        await page.click(selector);
+                        buttonFound = true;
+                        break;
+                        
+                    } catch (selectorError) {
+                        this.logger.debug(`Lightning selector failed: ${selector}`, { error: selectorError.message });
+                    }
+                }
 
-                this.logger.info('✅ Property modal opened successfully');
-                return true;
+                if (buttonFound) {
+                    // Wait for modal to appear
+                    this.logger.info('Button clicked, waiting for property modal to load');
+                    await page.waitForSelector(CONFIG.SELECTORS.propertyModal, { 
+                        timeout: CONFIG.MODAL_WAIT,
+                        state: 'visible'
+                    });
+
+                    // Additional wait for modal content to load
+                    await page.waitForTimeout(3000);
+
+                    this.logger.info('✅ Property modal opened successfully');
+                    return true;
+                } else {
+                    throw new Error('No Lightning filter button selectors worked');
+                }
 
             } catch (buttonError) {
-                this.logger.error('Failed to find or click Filter Properties button', { 
+                this.logger.error('Lightning-aware button detection failed', { 
                     error: buttonError.message 
                 });
                 
-                // Try alternative selectors for the button
-                const alternativeButtonSelectors = [
-                    'button:has-text("Filter Properties")',
-                    'input[value*="Filter Properties"]',
-                    '[onclick*="filter"], [onclick*="Filter"]',
-                    'button:contains("Filter Properties")',
-                    '.filter-button, .filterButton',
-                    'button[type="submit"]'
-                ];
-
-                for (const selector of alternativeButtonSelectors) {
-                    try {
-                        this.logger.debug(`Trying alternative button selector: ${selector}`);
-                        await page.waitForSelector(selector, { timeout: 5000 });
-                        await page.click(selector);
+                // FINAL ATTEMPT: Use JavaScript to find and click any filter-related button
+                this.logger.info('Trying comprehensive JavaScript button detection');
+                try {
+                    const filterButtonClicked = await page.evaluate(() => {
+                        console.log('Starting comprehensive button search...');
+                        
+                        // Get all potentially clickable elements
+                        const allElements = Array.from(document.querySelectorAll(
+                            'button, input[type="button"], input[type="submit"], [role="button"], [onclick], lightning-button'
+                        ));
+                        
+                        console.log(`Found ${allElements.length} potentially clickable elements`);
+                        
+                        for (const element of allElements) {
+                            const text = (element.textContent || element.value || '').toLowerCase();
+                            const ariaLabel = (element.getAttribute('aria-label') || '').toLowerCase();
+                            const className = (element.className || '').toLowerCase();
+                            const id = (element.id || '').toLowerCase();
+                            
+                            // Look for filter-related keywords
+                            const searchTerms = ['filter', 'search', 'apply', 'properties', 'submit'];
+                            const hasFilterKeyword = searchTerms.some(term => 
+                                text.includes(term) || ariaLabel.includes(term) || className.includes(term) || id.includes(term)
+                            );
+                            
+                            if (hasFilterKeyword && element.offsetParent !== null) { // Visible element
+                                console.log(`Found potential filter button: "${text || ariaLabel || className}" - attempting click`);
+                                
+                                try {
+                                    element.click();
+                                    console.log('Button clicked successfully');
+                                    return true;
+                                } catch (clickError) {
+                                    console.log(`Click failed: ${clickError}`);
+                                }
+                            }
+                        }
+                        
+                        console.log('No suitable filter button found');
+                        return false;
+                    });
+                    
+                    if (filterButtonClicked) {
+                        this.logger.info('Filter button clicked via JavaScript');
+                        await page.waitForTimeout(5000);
                         
                         // Check if modal appeared
-                        await page.waitForSelector(CONFIG.SELECTORS.propertyModal, { 
-                            timeout: 10000,
-                            state: 'visible'
-                        });
-                        
-                        this.logger.info(`✅ Modal opened with alternative selector: ${selector}`);
-                        return true;
-                        
-                    } catch (altError) {
-                        this.logger.debug(`Alternative selector failed: ${selector}`, { error: altError.message });
+                        const modalCount = await page.locator(CONFIG.SELECTORS.propertyModal).count();
+                        if (modalCount > 0) {
+                            this.logger.info('✅ Modal opened with JavaScript button detection');
+                            return true;
+                        } else {
+                            this.logger.warn('Button was clicked but no modal appeared');
+                        }
                     }
+                } catch (jsError) {
+                    this.logger.debug('JavaScript button detection failed', { error: jsError.message });
                 }
                 
-                throw new Error('Could not find or click Filter Properties button');
+                throw new Error('Could not find or click Filter Properties button after comprehensive Lightning-aware search');
             }
 
         } catch (error) {
-            this.logger.error('Failed to open property modal', { error: error.message });
+            this.logger.error('Failed to open property modal with Lightning awareness', { error: error.message });
             throw error;
         }
     }
