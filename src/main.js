@@ -1059,7 +1059,7 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Extract property data from Lightning table - WITH SLDS-TRUNCATE DIV EXTRACTION
+     * FIXED: Extract property data from Lightning table
      */
     async extractPropertyData(page) {
         try {
@@ -1068,12 +1068,12 @@ class EnterpriseSobhaPortalScraper {
             // Wait for modal content to be stable
             await page.waitForTimeout(2000);
 
-            // Wait for actual DATA TABLE to appear inside modal
+            // FIXED: Wait for actual TABLE to appear inside modal with correct selector
             this.logger.info('Waiting for Lightning property data table to load in modal...');
             
             try {
-                // Wait for Lightning table with actual data to appear inside modal
-                await page.waitForSelector('[role="dialog"] tbody, .slds-modal tbody', { 
+                // FIXED: Use correct selector based on HTML structure shown in images
+                await page.waitForSelector('.slds-modal table tbody', { 
                     timeout: 30000,
                     state: 'visible'
                 });
@@ -1085,7 +1085,7 @@ class EnterpriseSobhaPortalScraper {
                 
                 // Alternative: wait for any table-like structure
                 try {
-                    await page.waitForSelector('[role="dialog"] [role="table"], .slds-modal [role="grid"]', { 
+                    await page.waitForSelector('.slds-modal .customFilterTable', { 
                         timeout: 15000,
                         state: 'visible'
                     });
@@ -1102,7 +1102,7 @@ class EnterpriseSobhaPortalScraper {
             
             this.logger.info('Lightning loading wait completed, extracting table data');
 
-            // DEBUG: Extract data from Lightning table with detailed logging
+            // FIXED: Extract data from Lightning table with slds-truncate divs
             const extractedData = await page.evaluate((maxResults) => {
                 const results = [];
                 
@@ -1125,77 +1125,39 @@ class EnterpriseSobhaPortalScraper {
                 
                 console.log('✅ DEBUG: Modal found, analyzing Lightning table structure');
                 
-                // DEBUG: Try all possible tbody selectors
-                const tbodySelectors = [
-                    'tbody[lwc-774enseH4rp]',
-                    'tbody',
-                    '[role="rowgroup"]',
-                    'table tbody',
-                    '.slds-table tbody'
-                ];
-                
-                let tbody = null;
-                for (const selector of tbodySelectors) {
-                    const foundTbody = modal.querySelector(selector);
-                    if (foundTbody) {
-                        tbody = foundTbody;
-                        console.log(`✅ DEBUG: Found tbody with selector: ${selector}`);
-                        console.log(`DEBUG: Tbody classes: ${foundTbody.className}`);
-                        console.log(`DEBUG: Tbody attributes: ${Array.from(foundTbody.attributes).map(a => `${a.name}="${a.value}"`).join(', ')}`);
-                        break;
-                    }
+                // FIXED: Look for the table using correct selector based on HTML structure
+                const table = modal.querySelector('table.customFilterTable, .customFilterTable, table');
+                if (!table) {
+                    console.log('❌ DEBUG: No table found in modal');
+                    return results;
                 }
                 
+                console.log('✅ DEBUG: Table found');
+                
+                // FIXED: Look for tbody using correct selector
+                const tbody = table.querySelector('tbody');
                 if (!tbody) {
-                    console.log('❌ DEBUG: No tbody found with any selector');
-                    // DEBUG: Show what table elements exist
-                    const allTables = modal.querySelectorAll('table, [role="table"], [role="grid"]');
-                    console.log(`DEBUG: Found ${allTables.length} table-like elements in modal`);
-                    
-                    allTables.forEach((table, index) => {
-                        console.log(`DEBUG: Table ${index} classes: ${table.className}`);
-                        console.log(`DEBUG: Table ${index} children: ${Array.from(table.children).map(child => child.tagName).join(', ')}`);
-                    });
-                    
+                    console.log('❌ DEBUG: No tbody found in table');
                     return results;
                 }
                 
-                // DEBUG: Try all possible row selectors
-                const rowSelectors = [
-                    'tr.slds-hint-parent',
-                    'tr[lwc-774enseH4rp]', 
-                    'tr',
-                    '[role="row"]'
-                ];
+                console.log('✅ DEBUG: Tbody found');
                 
-                let rows = [];
-                for (const selector of rowSelectors) {
-                    const foundRows = tbody.querySelectorAll(selector);
-                    if (foundRows.length > 0) {
-                        rows = foundRows;
-                        console.log(`✅ DEBUG: Found ${foundRows.length} rows with selector: ${selector}`);
-                        break;
-                    }
-                }
+                // FIXED: Look for rows using correct selector from HTML structure
+                const rows = tbody.querySelectorAll('tr.slds-hint-parent, tr');
                 
-                if (rows.length === 0) {
-                    console.log('❌ DEBUG: No rows found with any selector');
-                    console.log(`DEBUG: Tbody HTML preview: ${tbody.innerHTML.substring(0, 500)}`);
-                    return results;
-                }
-                
-                console.log(`🔍 DEBUG: Processing ${rows.length} rows`);
+                console.log(`✅ DEBUG: Found ${rows.length} rows`);
                 
                 for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
                     const row = rows[i];
-                    const cells = row.querySelectorAll('td, [role="gridcell"], [role="cell"]');
+                    const cells = row.querySelectorAll('td');
                     
                     console.log(`DEBUG: Row ${i} has ${cells.length} cells`);
                     
-                    if (cells.length > 0) { // Changed from >= 6 to > 0 for debugging
-                        // DEBUG: Extract text from Lightning slds-truncate divs
+                    if (cells.length >= 6) {
+                        // FIXED: Extract text from slds-truncate divs
                         const cellTexts = Array.from(cells).map((cell, cellIndex) => {
-                            // Try multiple extraction methods
+                            // First try to get text from slds-truncate div (Lightning structure)
                             const truncateDiv = cell.querySelector('.slds-truncate');
                             const directText = cell.textContent?.trim() || '';
                             const truncateText = truncateDiv ? truncateDiv.textContent?.trim() || '' : '';
@@ -1205,11 +1167,10 @@ class EnterpriseSobhaPortalScraper {
                             return truncateText || directText;
                         });
                         
-                        console.log(`🔍 DEBUG: Row ${i} extracted texts:`, cellTexts);
+                        console.log(`DEBUG: Row ${i} extracted texts:`, cellTexts);
                         
-                        // Create property with all available data
                         const property = {
-                            unitId: `sobha_lightning_debug_${Date.now()}_${i}`,
+                            unitId: `sobha_lightning_${Date.now()}_${i}`,
                             project: cellTexts[0] || 'Unknown Project',
                             subProject: cellTexts[1] || '',
                             unitType: cellTexts[2] || '',
@@ -1219,25 +1180,23 @@ class EnterpriseSobhaPortalScraper {
                             startingPrice: cellTexts[6] || '',
                             availability: 'available',
                             sourceUrl: window.location.href,
-                            extractionMethod: 'Lightning-Table-Debug',
+                            extractionMethod: 'Lightning-Table-Fixed',
                             rawCellData: cellTexts,
-                            scrapedAt: new Date().toISOString(),
-                            debugInfo: {
-                                cellCount: cells.length,
-                                rowIndex: i,
-                                hasNonEmptyData: cellTexts.some(text => text && text.length > 0)
-                            }
+                            scrapedAt: new Date().toISOString()
                         };
                         
-                        // DEBUG: More lenient filtering - include if ANY cell has data
-                        if (cellTexts.some(text => text && text.length > 0 && text !== `Unit-${i + 1}`)) {
+                        // Filter valid properties
+                        if (property.project !== 'Unknown Project' && 
+                            property.unitNo && 
+                            property.unitNo !== `Unit-${i + 1}` &&
+                            property.project.length > 0) {
                             results.push(property);
                             console.log(`✅ DEBUG: Extracted Lightning property ${i}: ${property.project} - ${property.unitNo}`);
                         } else {
-                            console.log(`❌ DEBUG: Skipped row ${i} - no meaningful data found`);
+                            console.log(`❌ DEBUG: Skipped row ${i} - insufficient data`);
                         }
                     } else {
-                        console.log(`❌ DEBUG: Row ${i} has no cells`);
+                        console.log(`❌ DEBUG: Row ${i} has insufficient cells (${cells.length})`);
                     }
                 }
                 
@@ -1248,143 +1207,9 @@ class EnterpriseSobhaPortalScraper {
 
             this.logger.info('Lightning table extraction completed', { propertiesFound: extractedData.length });
 
-            // If we found properties, check if we need to scroll for more
-            if (extractedData.length > 0) {
-                try {
-                    this.logger.info('Checking for additional Lightning properties by scrolling');
-                    
-                    // Scroll within the modal to load more properties
-                    await page.evaluate(() => {
-                        // Find modal using standard CSS selectors
-                        let modal = null;
-                        const dialogModals = document.querySelectorAll('[role="dialog"]');
-                        const sldsModals = document.querySelectorAll('.slds-modal');
-                        
-                        for (const m of [...dialogModals, ...sldsModals]) {
-                            if (m.offsetParent !== null) { // Visible modal
-                                modal = m;
-                                break;
-                            }
-                        }
-                        
-                        if (modal) {
-                            const scrollableArea = modal.querySelector('.slds-scrollable, .scroll, [style*="overflow"]') || modal;
-                            scrollableArea.scrollTop = scrollableArea.scrollHeight;
-                        }
-                    });
-                    
-                    // Wait for potential new content
-                    await page.waitForTimeout(3000);
-                    
-                    // Extract additional data after scrolling
-                    const additionalData = await page.evaluate((maxResults, currentCount) => {
-                        const results = [];
-                        
-                        // Find modal using standard CSS selectors
-                        let modal = null;
-                        const dialogModals = document.querySelectorAll('[role="dialog"]');
-                        const sldsModals = document.querySelectorAll('.slds-modal');
-                        
-                        for (const m of [...dialogModals, ...sldsModals]) {
-                            if (m.offsetParent !== null) { // Visible modal
-                                modal = m;
-                                break;
-                            }
-                        }
-                        
-                        if (modal) {
-                            const tbody = modal.querySelector('tbody[lwc-774enseH4rp], tbody');
-                            if (tbody) {
-                                const rows = tbody.querySelectorAll('tr.slds-hint-parent, tr[lwc-774enseH4rp], tr');
-                                
-                                // Only process rows beyond what we already have
-                                for (let i = currentCount; i < Math.min(rows.length, maxResults); i++) {
-                                    const row = rows[i];
-                                    const cells = row.querySelectorAll('td');
-                                    
-                                    if (cells.length >= 6) {
-                                        const cellTexts = Array.from(cells).map(cell => {
-                                            const truncateDiv = cell.querySelector('.slds-truncate');
-                                            if (truncateDiv) {
-                                                return truncateDiv.textContent?.trim() || '';
-                                            }
-                                            return cell.textContent?.trim() || '';
-                                        });
-                                        
-                                        const property = {
-                                            unitId: `sobha_lightning_scroll_${Date.now()}_${i}`,
-                                            project: cellTexts[0] || 'Unknown Project',
-                                            subProject: cellTexts[1] || '',
-                                            unitType: cellTexts[2] || '',
-                                            floor: cellTexts[3] || '',
-                                            unitNo: cellTexts[4] || `Unit-${i + 1}`,
-                                            totalUnitArea: cellTexts[5] || '',
-                                            startingPrice: cellTexts[6] || '',
-                                            availability: 'available',
-                                            sourceUrl: window.location.href,
-                                            extractionMethod: 'Lightning-Table-Scroll',
-                                            rawCellData: cellTexts,
-                                            scrapedAt: new Date().toISOString()
-                                        };
-                                        
-                                        if (property.project !== 'Unknown Project' && 
-                                            property.unitNo && 
-                                            property.unitNo !== `Unit-${i + 1}` &&
-                                            property.project.length > 0) {
-                                            results.push(property);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        return results;
-                    }, this.input.maxResults, extractedData.length);
-                    
-                    // Combine original and additional data
-                    extractedData.push(...additionalData);
-                    
-                    this.logger.info('Lightning scroll extraction completed', { 
-                        additionalProperties: additionalData.length,
-                        totalProperties: extractedData.length 
-                    });
-                    
-                } catch (scrollError) {
-                    this.logger.warn('Failed to scroll for additional Lightning properties', { error: scrollError.message });
-                }
-            }
-
             // If no properties found, create debug entry
             if (extractedData.length === 0) {
                 this.logger.warn('No Lightning property data found in modal - creating debug entry');
-                
-                const modalAnalysis = await page.evaluate(() => {
-                    // Find modal using standard CSS selectors
-                    let modal = null;
-                    const dialogModals = document.querySelectorAll('[role="dialog"]');
-                    const sldsModals = document.querySelectorAll('.slds-modal');
-                    
-                    for (const m of [...dialogModals, ...sldsModals]) {
-                        if (m.offsetParent !== null) { // Visible modal
-                            modal = m;
-                            break;
-                        }
-                    }
-                    
-                    if (!modal) return { error: 'No modal found' };
-                    
-                    const tbody = modal.querySelector('tbody[lwc-774enseH4rp], tbody');
-                    const rows = tbody ? tbody.querySelectorAll('tr') : [];
-                    
-                    return {
-                        modalText: modal.textContent?.substring(0, 1000) || '',
-                        hasTbody: !!tbody,
-                        rowCount: rows.length,
-                        modalClasses: modal.className || '',
-                        tbodyClasses: tbody ? tbody.className : 'No tbody found',
-                        sampleRowContent: rows.length > 0 ? rows[0].textContent?.substring(0, 200) : 'No rows found'
-                    };
-                });
                 
                 extractedData.push({
                     unitId: `debug_lightning_modal_${Date.now()}`,
@@ -1398,8 +1223,7 @@ class EnterpriseSobhaPortalScraper {
                     availability: 'debug',
                     sourceUrl: page.url(),
                     debugInfo: {
-                        message: 'No Lightning property data found in modal',
-                        modalAnalysis: modalAnalysis
+                        message: 'No Lightning property data found in modal'
                     },
                     extractionMethod: 'Lightning-Debug',
                     scrapedAt: new Date().toISOString()
