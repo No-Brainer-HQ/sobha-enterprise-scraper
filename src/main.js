@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.6 - FIXED LIGHTNING TABLE EXTRACTION (LOCATOR-BASED)
+ * Version: 1.0.7 - FINAL - PERFORMANCE-TUNED BATCH EXTRACTION
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -197,7 +197,7 @@ class MetricsCollector {
     }
 
     recordPropertiesScraped(count) {
-        this.metrics.propertiesScraped = count;
+        this.metrics.propertiesScraped += count; // Use += for batch processing
     }
 
     recordMemoryUsage() {
@@ -1060,11 +1060,12 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Extract property data from Lightning table using Playwright locators
+     * FIXED: Extract property data from Lightning table using BATCHED Playwright locators for performance
      */
     async extractPropertyData(page) {
         try {
-            this.logger.info('Starting Lightning table extraction using Playwright locators');
+            this.logger.info('Starting batched/parallel extraction using Playwright locators');
+            const BATCH_SIZE = 50; // Process 50 rows in parallel at a time
 
             // Wait for the modal and a table body within it to be stable.
             this.logger.info('Waiting for Lightning property data table to load in modal...');
@@ -1075,65 +1076,82 @@ class EnterpriseSobhaPortalScraper {
             // Allow a brief moment for all rows to render after the tbody is visible.
             await page.waitForTimeout(3000);
 
-            const properties = [];
-            const rows = await tableBodyLocator.locator('tr').all();
-            this.logger.info(`Found ${rows.length} rows in the table. Processing up to ${this.input.maxResults} rows.`);
+            const allProperties = [];
+            const rowLocator = tableBodyLocator.locator('tr');
+            const rowCount = await rowLocator.count();
+            const totalToProcess = Math.min(rowCount, this.input.maxResults);
 
-            if (rows.length === 0) {
-                 this.logger.warn('Table body was found, but it contains 0 rows. The table might be empty.');
+            this.logger.info(`Found ${rowCount} rows. Processing ${totalToProcess} in batches of ${BATCH_SIZE}.`);
+
+            if (rowCount === 0) {
+                this.logger.warn('Table body was found, but it contains 0 rows.');
             }
 
-            for (let i = 0; i < Math.min(rows.length, this.input.maxResults); i++) {
-                const rowLocator = rows[i];
-                const cells = await rowLocator.locator('td').all();
+            for (let i = 0; i < totalToProcess; i += BATCH_SIZE) {
+                const batchStart = i;
+                const batchEnd = Math.min(i + BATCH_SIZE, totalToProcess);
+                const batchPromises = [];
 
-                if (cells.length >= 7) {
-                    // Extract text from all cells concurrently for this row
-                    const cellTexts = await Promise.all(cells.map(async (cell) => {
-                         // Attempt to get text from a common inner element first, then fallback to the cell itself
-                         const truncateDiv = cell.locator('.slds-truncate');
-                         if (await truncateDiv.count() > 0) {
-                             return (await truncateDiv.first().textContent() || '').trim();
-                         }
-                         return (await cell.textContent() || '').trim();
-                    }));
-
-                    const property = {
-                        unitId: `sobha_playwright_${Date.now()}_${i}`,
-                        project: cellTexts[0] || 'Unknown Project',
-                        subProject: cellTexts[1] || '',
-                        unitType: cellTexts[2] || '',
-                        floor: cellTexts[3] || '',
-                        unitNo: cellTexts[4] || `Unit-${i + 1}`,
-                        totalUnitArea: cellTexts[5] || '',
-                        startingPrice: cellTexts[6] || '',
-                        availability: 'available',
-                        sourceUrl: page.url(),
-                        extractionMethod: 'Playwright-Locator-Iteration',
-                        rawCellData: cellTexts,
-                        scrapedAt: new Date().toISOString(),
-                    };
+                this.logger.info(`Processing batch: rows ${batchStart + 1} to ${batchEnd}`);
+                
+                for (let j = batchStart; j < batchEnd; j++) {
+                    const currentRowLocator = rowLocator.nth(j);
                     
-                    if (cellTexts.some(text => text && text.length > 0)) {
-                        properties.push(property);
-                    } else {
-                        this.logger.warn(`Skipped row ${i} as it contained no data.`);
-                    }
+                    const processRow = async () => {
+                        const cells = await currentRowLocator.locator('td').all();
+                        if (cells.length < 7) return null;
 
-                } else {
-                    this.logger.warn(`Skipping row ${i} due to insufficient cell count (${cells.length}/7)`);
+                        const cellTexts = await Promise.all(cells.map(async (cell) => {
+                            const truncateDiv = cell.locator('.slds-truncate');
+                            if (await truncateDiv.count() > 0) {
+                                return (await truncateDiv.first().textContent() || '').trim();
+                            }
+                            return (await cell.textContent() || '').trim();
+                        }));
+
+                        if (!cellTexts.some(text => text && text.length > 0)) return null;
+
+                        return {
+                            unitId: `sobha_batch_${Date.now()}_${j}`,
+                            project: cellTexts[0] || 'Unknown Project',
+                            subProject: cellTexts[1] || '',
+                            unitType: cellTexts[2] || '',
+                            floor: cellTexts[3] || '',
+                            unitNo: cellTexts[4] || `Unit-${j + 1}`,
+                            totalUnitArea: cellTexts[5] || '',
+                            startingPrice: cellTexts[6] || '',
+                            availability: 'available',
+                            sourceUrl: page.url(),
+                            extractionMethod: 'Playwright-Batched-Iteration',
+                            rawCellData: cellTexts,
+                            scrapedAt: new Date().toISOString(),
+                        };
+                    };
+                    batchPromises.push(processRow());
                 }
+
+                const batchResults = await Promise.all(batchPromises);
+                const validPropertiesInBatch = batchResults.filter(p => p !== null);
+                
+                if (validPropertiesInBatch.length > 0) {
+                    allProperties.push(...validPropertiesInBatch);
+                    this.metrics.recordPropertiesScraped(validPropertiesInBatch.length);
+                    // No need to push to dataset here, do it once at the end.
+                }
+
+                this.logger.info(`Batch complete. Total properties scraped so far: ${allProperties.length}`);
             }
 
-            this.logger.info('Playwright locator-based extraction completed', { propertiesFound: properties.length });
 
-            // If no properties found, create a debug entry
-            if (properties.length === 0) {
-                this.logger.warn('No valid property data extracted - creating debug entry');
-                properties.push({
+            this.logger.info('Batched extraction completed', { totalPropertiesFound: allProperties.length });
+
+            // If no properties found after all batches, create a debug entry
+            if (allProperties.length === 0 && rowCount > 0) {
+                this.logger.warn('No valid property data extracted despite rows being present - creating debug entry');
+                allProperties.push({
                     unitId: `debug_playwright_modal_${Date.now()}`,
                     project: 'Playwright Modal Debug Entry',
-                    subProject: `No Properties Found (inspected ${rows.length} rows)`,
+                    subProject: `No Properties Found (inspected ${rowCount} rows)`,
                     unitType: 'Debug',
                     floor: '0',
                     unitNo: 'DEBUG-PLAYWRIGHT-001',
@@ -1141,16 +1159,15 @@ class EnterpriseSobhaPortalScraper {
                     startingPrice: '0',
                     availability: 'debug',
                     sourceUrl: page.url(),
-                    extractionMethod: 'Playwright-Debug',
+                    extractionMethod: 'Playwright-Debug-Batched',
                     scrapedAt: new Date().toISOString()
                 });
             }
-
-            this.metrics.recordPropertiesScraped(properties.length);
-            return properties;
+            
+            return allProperties;
 
         } catch (error) {
-            this.logger.error('Playwright-based property data extraction failed', { error: error.message });
+            this.logger.error('Playwright-based batched extraction failed', { error: error.message, stack: error.stack });
             
             // Return error entry
             return [{
@@ -1162,7 +1179,7 @@ class EnterpriseSobhaPortalScraper {
                 unitNo: 'ERROR-LIGHTNING-001',
                 totalUnitArea: '0',
                 startingPrice: '0',
-                availability: 'error',
+availability: 'error',
                 sourceUrl: page.url(),
                 errorInfo: error.message,
                 extractionMethod: 'Lightning-Error-Fallback',
@@ -1176,9 +1193,12 @@ class EnterpriseSobhaPortalScraper {
      * Main enhanced scraping workflow with Lightning table extraction
      */
     async executeScraping() {
+        // Increase the request handler timeout to give batch processing enough time
+        const requestHandlerTimeoutSecs = Math.max(CONFIG.REQUEST_TIMEOUT / 1000, 900); // at least 15 mins
+
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000,
+            requestHandlerTimeoutSecs, // Use the adjusted timeout
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
@@ -1254,7 +1274,7 @@ class EnterpriseSobhaPortalScraper {
                         
                         // Metadata
                         metadata: {
-                            scraperVersion: '1.0.6',
+                            scraperVersion: '1.0.7',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
