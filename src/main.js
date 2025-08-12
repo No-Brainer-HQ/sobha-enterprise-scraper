@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.5 - FIXED LIGHTNING TABLE EXTRACTION
+ * Version: 1.0.6 - FIXED LIGHTNING TABLE EXTRACTION (LOCATOR-BASED)
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -947,17 +947,18 @@ class EnterpriseSobhaPortalScraper {
                 for (const selector of lightningFilterSelectors) {
                     try {
                         this.logger.debug(`Trying Lightning selector: ${selector}`);
+                        const buttonLocator = page.locator(selector);
                         
                         // Wait for the element with a reasonable timeout
-                        await page.waitForSelector(selector, { 
+                        await buttonLocator.waitFor({ 
                             timeout: 5000,
                             state: 'visible'
                         });
 
                         this.logger.info(`Found button with Lightning selector: ${selector}`);
                         
-                        // Click the button
-                        await page.click(selector);
+                        // Click the button using the locator (more robust)
+                        await buttonLocator.click();
                         buttonFound = true;
                         break;
                         
@@ -1059,256 +1060,97 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Extract property data from Lightning table
+     * FIXED: Extract property data from Lightning table using Playwright locators
      */
     async extractPropertyData(page) {
         try {
-            this.logger.info('Starting Lightning table-based property data extraction');
+            this.logger.info('Starting Lightning table extraction using Playwright locators');
 
-            // FIXED: Wait for table to appear, then extract immediately (no 25-second wait)
+            // Wait for the modal and a table body within it to be stable.
             this.logger.info('Waiting for Lightning property data table to load in modal...');
-            
-            try {
-                // FIXED: Use correct selector based on HTML structure shown in images
-                await page.waitForSelector('.slds-modal table tbody', { 
-                    timeout: 30000,
-                    state: 'visible'
-                });
-                
-                this.logger.info('✅ Lightning property data table found in modal');
-                
-            } catch (tableWaitError) {
-                this.logger.warn('Lightning table selector failed, trying alternative approach');
-                
-                // Alternative: wait for any table-like structure
-                try {
-                    await page.waitForSelector('.slds-modal .customFilterTable', { 
-                        timeout: 15000,
-                        state: 'visible'
-                    });
-                    this.logger.info('✅ Alternative Lightning table structure found');
-                } catch (altTableError) {
-                    this.logger.error('No Lightning table found in modal after waiting', { error: altTableError.message });
-                    throw new Error('Lightning property data table did not load in modal within timeout');
-                }
-            }
+            const tableBodyLocator = page.locator('.slds-modal .customFilterTable tbody, .slds-modal table tbody').first();
+            await tableBodyLocator.waitFor({ state: 'visible', timeout: 30000 });
+            this.logger.info('✅ Lightning property data table found in modal');
 
-            // FIXED: Extract data immediately while modal is still open (no 25-second wait)
-            this.logger.info('Modal and table detected - extracting data immediately to prevent auto-close');
-            
-            // Short wait for content stability (3 seconds instead of 25)
+            // Allow a brief moment for all rows to render after the tbody is visible.
             await page.waitForTimeout(3000);
 
-            // ENHANCED DEBUG: Extract data with comprehensive logging
-            const extractionResult = await page.evaluate((maxResults) => {
-                const debugLog = [];
-                const results = [];
-                
-                debugLog.push('🚀 DEBUG: Starting extraction evaluation');
-                
-                // STEP 1: Comprehensive modal detection
-                debugLog.push('🔍 DEBUG: Step 1 - Finding modal');
-                
-                const dialogModals = document.querySelectorAll('[role="dialog"]');
-                const sldsModals = document.querySelectorAll('.slds-modal');
-                const allModals = [...dialogModals, ...sldsModals];
-                
-                debugLog.push(`DEBUG: Found ${dialogModals.length} dialog modals, ${sldsModals.length} slds modals`);
-                
-                let modal = null;
-                for (let i = 0; i < allModals.length; i++) {
-                    const m = allModals[i];
-                    const isVisible = m.offsetParent !== null;
-                    debugLog.push(`DEBUG: Modal ${i}: visible=${isVisible}, classes="${m.className}"`);
-                    if (isVisible) {
-                        modal = m;
-                        debugLog.push(`✅ DEBUG: Using modal ${i} as active modal`);
-                        break;
-                    }
-                }
-                
-                if (!modal) {
-                    debugLog.push('❌ DEBUG: No visible modal found after checking all modals');
-                    return { results, debugLog, error: 'No visible modal found' };
-                }
-                
-                // STEP 2: Table detection with multiple strategies
-                debugLog.push('🔍 DEBUG: Step 2 - Finding table in modal');
-                
-                const tableSelectors = [
-                    'table.customFilterTable',
-                    '.customFilterTable',
-                    'table',
-                    '.slds-table',
-                    '[role="table"]'
-                ];
-                
-                let table = null;
-                for (const selector of tableSelectors) {
-                    table = modal.querySelector(selector);
-                    if (table) {
-                        debugLog.push(`✅ DEBUG: Found table with selector: ${selector}`);
-                        break;
-                    } else {
-                        debugLog.push(`❌ DEBUG: No table found with selector: ${selector}`);
-                    }
-                }
-                
-                if (!table) {
-                    debugLog.push('❌ DEBUG: No table found with any selector');
-                    debugLog.push(`DEBUG: Modal content preview: ${modal.innerHTML.substring(0, 500)}`);
-                    return { results, debugLog, error: 'No table found' };
-                }
-                
-                // STEP 3: Tbody detection
-                debugLog.push('🔍 DEBUG: Step 3 - Finding tbody');
-                const tbody = table.querySelector('tbody');
-                if (!tbody) {
-                    debugLog.push('❌ DEBUG: No tbody found in table');
-                    debugLog.push(`DEBUG: Table content preview: ${table.innerHTML.substring(0, 500)}`);
-                    return { results, debugLog, error: 'No tbody found' };
-                }
-                debugLog.push('✅ DEBUG: Tbody found');
-                
-                // STEP 4: Row detection
-                debugLog.push('🔍 DEBUG: Step 4 - Finding rows');
-                const rowSelectors = ['tr.slds-hint-parent', 'tr'];
-                let rows = [];
-                
-                for (const selector of rowSelectors) {
-                    rows = tbody.querySelectorAll(selector);
-                    if (rows.length > 0) {
-                        debugLog.push(`✅ DEBUG: Found ${rows.length} rows with selector: ${selector}`);
-                        break;
-                    } else {
-                        debugLog.push(`❌ DEBUG: No rows found with selector: ${selector}`);
-                    }
-                }
-                
-                if (rows.length === 0) {
-                    debugLog.push('❌ DEBUG: No rows found with any selector');
-                    debugLog.push(`DEBUG: Tbody content preview: ${tbody.innerHTML.substring(0, 500)}`);
-                    return { results, debugLog, error: 'No rows found' };
-                }
-                
-                // STEP 5: Process rows
-                debugLog.push('🔍 DEBUG: Step 5 - Processing rows');
-                for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
-                    debugLog.push(`DEBUG: Processing row ${i}`);
-                    const row = rows[i];
-                    const cells = row.querySelectorAll('td');
-                    
-                    debugLog.push(`DEBUG: Row ${i} has ${cells.length} cells`);
-                    
-                    if (cells.length >= 7) {
-                        // Extract text from each cell
-                        const cellTexts = [];
-                        for (let cellIndex = 0; cellIndex < cells.length; cellIndex++) {
-                            const cell = cells[cellIndex];
-                            const truncateDiv = cell.querySelector('.slds-truncate');
-                            const directText = cell.textContent?.trim() || '';
-                            const truncateText = truncateDiv ? truncateDiv.textContent?.trim() || '' : '';
-                            const finalText = truncateText || directText;
-                            
-                            cellTexts.push(finalText);
-                            debugLog.push(`DEBUG: Cell ${cellIndex}: "${finalText}" (truncate: "${truncateText}", direct: "${directText}")`);
-                        }
-                        
-                        const property = {
-                            unitId: `sobha_lightning_debug_${Date.now()}_${i}`,
-                            project: cellTexts[0] || 'Unknown Project',
-                            subProject: cellTexts[1] || '',
-                            unitType: cellTexts[2] || '',
-                            floor: cellTexts[3] || '',
-                            unitNo: cellTexts[4] || `Unit-${i + 1}`,
-                            totalUnitArea: cellTexts[5] || '',
-                            startingPrice: cellTexts[6] || '',
-                            availability: 'available',
-                            sourceUrl: window.location.href,
-                            extractionMethod: 'Lightning-Enhanced-Debug',
-                            rawCellData: cellTexts,
-                            scrapedAt: new Date().toISOString(),
-                            debugInfo: {
-                                cellCount: cells.length,
-                                rowIndex: i,
-                                hasValidProject: !!(cellTexts[0] && cellTexts[0] !== 'Unknown Project' && cellTexts[0].length > 0)
-                            }
-                        };
-                        
-                        // Very lenient filtering - accept any row with some data
-                        if (cellTexts.some(text => text && text.length > 0)) {
-                            results.push(property);
-                            debugLog.push(`✅ DEBUG: Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
-                        } else {
-                            debugLog.push(`❌ DEBUG: Skipped row ${i} - no meaningful data found`);
-                        }
-                    } else {
-                        debugLog.push(`❌ DEBUG: Row ${i} has only ${cells.length} cells (need 7+)`);
-                        if (cells.length > 0) {
-                            // Show what cells we do have
-                            for (let j = 0; j < cells.length; j++) {
-                                debugLog.push(`DEBUG: Available cell ${j}: "${cells[j].textContent?.trim()}"`);
-                            }
-                        }
-                    }
-                }
-                
-                debugLog.push(`🎯 DEBUG: Extraction complete - found ${results.length} properties`);
-                return { results, debugLog, success: true };
-                
-            }, this.input.maxResults);
+            const properties = [];
+            const rows = await tableBodyLocator.locator('tr').all();
+            this.logger.info(`Found ${rows.length} rows in the table. Processing up to ${this.input.maxResults} rows.`);
 
-            // Log all debug information
-            if (extractionResult.debugLog) {
-                for (const logEntry of extractionResult.debugLog) {
-                    this.logger.info(`EXTRACTION DEBUG: ${logEntry}`);
+            if (rows.length === 0) {
+                 this.logger.warn('Table body was found, but it contains 0 rows. The table might be empty.');
+            }
+
+            for (let i = 0; i < Math.min(rows.length, this.input.maxResults); i++) {
+                const rowLocator = rows[i];
+                const cells = await rowLocator.locator('td').all();
+
+                if (cells.length >= 7) {
+                    // Extract text from all cells concurrently for this row
+                    const cellTexts = await Promise.all(cells.map(async (cell) => {
+                         // Attempt to get text from a common inner element first, then fallback to the cell itself
+                         const truncateDiv = cell.locator('.slds-truncate');
+                         if (await truncateDiv.count() > 0) {
+                             return (await truncateDiv.first().textContent() || '').trim();
+                         }
+                         return (await cell.textContent() || '').trim();
+                    }));
+
+                    const property = {
+                        unitId: `sobha_playwright_${Date.now()}_${i}`,
+                        project: cellTexts[0] || 'Unknown Project',
+                        subProject: cellTexts[1] || '',
+                        unitType: cellTexts[2] || '',
+                        floor: cellTexts[3] || '',
+                        unitNo: cellTexts[4] || `Unit-${i + 1}`,
+                        totalUnitArea: cellTexts[5] || '',
+                        startingPrice: cellTexts[6] || '',
+                        availability: 'available',
+                        sourceUrl: page.url(),
+                        extractionMethod: 'Playwright-Locator-Iteration',
+                        rawCellData: cellTexts,
+                        scrapedAt: new Date().toISOString(),
+                    };
+                    
+                    if (cellTexts.some(text => text && text.length > 0)) {
+                        properties.push(property);
+                    } else {
+                        this.logger.warn(`Skipped row ${i} as it contained no data.`);
+                    }
+
+                } else {
+                    this.logger.warn(`Skipping row ${i} due to insufficient cell count (${cells.length}/7)`);
                 }
             }
 
-            const extractedData = extractionResult.results || [];
+            this.logger.info('Playwright locator-based extraction completed', { propertiesFound: properties.length });
 
-            this.logger.info('Lightning table extraction completed', { propertiesFound: extractedData.length });
-
-            // If no properties found, create debug entry
-            if (extractedData.length === 0) {
-                this.logger.warn('No Lightning property data found in modal - creating debug entry');
-                
-                extractedData.push({
-                    unitId: `debug_lightning_modal_${Date.now()}`,
-                    project: 'Lightning Modal Debug Entry',
-                    subProject: 'No Properties Found',
+            // If no properties found, create a debug entry
+            if (properties.length === 0) {
+                this.logger.warn('No valid property data extracted - creating debug entry');
+                properties.push({
+                    unitId: `debug_playwright_modal_${Date.now()}`,
+                    project: 'Playwright Modal Debug Entry',
+                    subProject: `No Properties Found (inspected ${rows.length} rows)`,
                     unitType: 'Debug',
                     floor: '0',
-                    unitNo: 'DEBUG-LIGHTNING-001',
+                    unitNo: 'DEBUG-PLAYWRIGHT-001',
                     totalUnitArea: '0',
                     startingPrice: '0',
                     availability: 'debug',
                     sourceUrl: page.url(),
-                    debugInfo: {
-                        message: 'No Lightning property data found in modal'
-                    },
-                    extractionMethod: 'Lightning-Debug',
+                    extractionMethod: 'Playwright-Debug',
                     scrapedAt: new Date().toISOString()
                 });
             }
 
-            // Validate extracted data
-            const validProperties = extractedData.filter(prop => 
-                prop.unitId && prop.project && prop.unitNo
-            );
-
-            this.metrics.recordPropertiesScraped(validProperties.length);
-            
-            this.logger.info('Lightning modal property data extraction completed', {
-                totalExtracted: extractedData.length,
-                validProperties: validProperties.length,
-                extractionMethods: [...new Set(extractedData.map(p => p.extractionMethod))]
-            });
-
-            return validProperties;
+            this.metrics.recordPropertiesScraped(properties.length);
+            return properties;
 
         } catch (error) {
-            this.logger.error('Lightning modal property data extraction failed', { error: error.message });
+            this.logger.error('Playwright-based property data extraction failed', { error: error.message });
             
             // Return error entry
             return [{
@@ -1328,6 +1170,7 @@ class EnterpriseSobhaPortalScraper {
             }];
         }
     }
+
 
     /**
      * Main enhanced scraping workflow with Lightning table extraction
@@ -1411,7 +1254,7 @@ class EnterpriseSobhaPortalScraper {
                         
                         // Metadata
                         metadata: {
-                            scraperVersion: '1.0.5',
+                            scraperVersion: '1.0.6',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
