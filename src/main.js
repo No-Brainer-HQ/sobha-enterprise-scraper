@@ -1103,38 +1103,40 @@ class EnterpriseSobhaPortalScraper {
             this.logger.info('Lightning loading wait completed, extracting table data');
 
             // ENHANCED DEBUG: Extract data with comprehensive logging
-            const extractedData = await page.evaluate((maxResults) => {
-                console.log('🚀 DEBUG: Starting extraction evaluation');
+            const extractionResult = await page.evaluate((maxResults) => {
+                const debugLog = [];
                 const results = [];
                 
+                debugLog.push('🚀 DEBUG: Starting extraction evaluation');
+                
                 // STEP 1: Comprehensive modal detection
-                console.log('🔍 DEBUG: Step 1 - Finding modal');
+                debugLog.push('🔍 DEBUG: Step 1 - Finding modal');
                 
                 const dialogModals = document.querySelectorAll('[role="dialog"]');
                 const sldsModals = document.querySelectorAll('.slds-modal');
                 const allModals = [...dialogModals, ...sldsModals];
                 
-                console.log(`DEBUG: Found ${dialogModals.length} dialog modals, ${sldsModals.length} slds modals`);
+                debugLog.push(`DEBUG: Found ${dialogModals.length} dialog modals, ${sldsModals.length} slds modals`);
                 
                 let modal = null;
                 for (let i = 0; i < allModals.length; i++) {
                     const m = allModals[i];
                     const isVisible = m.offsetParent !== null;
-                    console.log(`DEBUG: Modal ${i}: visible=${isVisible}, classes="${m.className}"`);
+                    debugLog.push(`DEBUG: Modal ${i}: visible=${isVisible}, classes="${m.className}"`);
                     if (isVisible) {
                         modal = m;
-                        console.log(`✅ DEBUG: Using modal ${i} as active modal`);
+                        debugLog.push(`✅ DEBUG: Using modal ${i} as active modal`);
                         break;
                     }
                 }
                 
                 if (!modal) {
-                    console.log('❌ DEBUG: No visible modal found after checking all modals');
-                    return results;
+                    debugLog.push('❌ DEBUG: No visible modal found after checking all modals');
+                    return { results, debugLog, error: 'No visible modal found' };
                 }
                 
                 // STEP 2: Table detection with multiple strategies
-                console.log('🔍 DEBUG: Step 2 - Finding table in modal');
+                debugLog.push('🔍 DEBUG: Step 2 - Finding table in modal');
                 
                 const tableSelectors = [
                     'table.customFilterTable',
@@ -1148,59 +1150,58 @@ class EnterpriseSobhaPortalScraper {
                 for (const selector of tableSelectors) {
                     table = modal.querySelector(selector);
                     if (table) {
-                        console.log(`✅ DEBUG: Found table with selector: ${selector}`);
+                        debugLog.push(`✅ DEBUG: Found table with selector: ${selector}`);
                         break;
                     } else {
-                        console.log(`❌ DEBUG: No table found with selector: ${selector}`);
+                        debugLog.push(`❌ DEBUG: No table found with selector: ${selector}`);
                     }
                 }
                 
                 if (!table) {
-                    console.log('❌ DEBUG: No table found with any selector');
-                    // DEBUG: Show what's actually in the modal
-                    console.log('DEBUG: Modal content preview:', modal.innerHTML.substring(0, 500));
-                    return results;
+                    debugLog.push('❌ DEBUG: No table found with any selector');
+                    debugLog.push(`DEBUG: Modal content preview: ${modal.innerHTML.substring(0, 500)}`);
+                    return { results, debugLog, error: 'No table found' };
                 }
                 
                 // STEP 3: Tbody detection
-                console.log('🔍 DEBUG: Step 3 - Finding tbody');
+                debugLog.push('🔍 DEBUG: Step 3 - Finding tbody');
                 const tbody = table.querySelector('tbody');
                 if (!tbody) {
-                    console.log('❌ DEBUG: No tbody found in table');
-                    console.log('DEBUG: Table content preview:', table.innerHTML.substring(0, 500));
-                    return results;
+                    debugLog.push('❌ DEBUG: No tbody found in table');
+                    debugLog.push(`DEBUG: Table content preview: ${table.innerHTML.substring(0, 500)}`);
+                    return { results, debugLog, error: 'No tbody found' };
                 }
-                console.log('✅ DEBUG: Tbody found');
+                debugLog.push('✅ DEBUG: Tbody found');
                 
                 // STEP 4: Row detection
-                console.log('🔍 DEBUG: Step 4 - Finding rows');
+                debugLog.push('🔍 DEBUG: Step 4 - Finding rows');
                 const rowSelectors = ['tr.slds-hint-parent', 'tr'];
                 let rows = [];
                 
                 for (const selector of rowSelectors) {
                     rows = tbody.querySelectorAll(selector);
                     if (rows.length > 0) {
-                        console.log(`✅ DEBUG: Found ${rows.length} rows with selector: ${selector}`);
+                        debugLog.push(`✅ DEBUG: Found ${rows.length} rows with selector: ${selector}`);
                         break;
                     } else {
-                        console.log(`❌ DEBUG: No rows found with selector: ${selector}`);
+                        debugLog.push(`❌ DEBUG: No rows found with selector: ${selector}`);
                     }
                 }
                 
                 if (rows.length === 0) {
-                    console.log('❌ DEBUG: No rows found with any selector');
-                    console.log('DEBUG: Tbody content preview:', tbody.innerHTML.substring(0, 500));
-                    return results;
+                    debugLog.push('❌ DEBUG: No rows found with any selector');
+                    debugLog.push(`DEBUG: Tbody content preview: ${tbody.innerHTML.substring(0, 500)}`);
+                    return { results, debugLog, error: 'No rows found' };
                 }
                 
                 // STEP 5: Process rows
-                console.log('🔍 DEBUG: Step 5 - Processing rows');
+                debugLog.push('🔍 DEBUG: Step 5 - Processing rows');
                 for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
-                    console.log(`DEBUG: Processing row ${i}`);
+                    debugLog.push(`DEBUG: Processing row ${i}`);
                     const row = rows[i];
                     const cells = row.querySelectorAll('td');
                     
-                    console.log(`DEBUG: Row ${i} has ${cells.length} cells`);
+                    debugLog.push(`DEBUG: Row ${i} has ${cells.length} cells`);
                     
                     if (cells.length >= 7) {
                         // Extract text from each cell
@@ -1213,7 +1214,7 @@ class EnterpriseSobhaPortalScraper {
                             const finalText = truncateText || directText;
                             
                             cellTexts.push(finalText);
-                            console.log(`DEBUG: Cell ${cellIndex}: "${finalText}" (truncate: "${truncateText}", direct: "${directText}")`);
+                            debugLog.push(`DEBUG: Cell ${cellIndex}: "${finalText}" (truncate: "${truncateText}", direct: "${directText}")`);
                         }
                         
                         const property = {
@@ -1240,25 +1241,34 @@ class EnterpriseSobhaPortalScraper {
                         // Very lenient filtering - accept any row with some data
                         if (cellTexts.some(text => text && text.length > 0)) {
                             results.push(property);
-                            console.log(`✅ DEBUG: Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
+                            debugLog.push(`✅ DEBUG: Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
                         } else {
-                            console.log(`❌ DEBUG: Skipped row ${i} - no meaningful data found`);
+                            debugLog.push(`❌ DEBUG: Skipped row ${i} - no meaningful data found`);
                         }
                     } else {
-                        console.log(`❌ DEBUG: Row ${i} has only ${cells.length} cells (need 7+)`);
+                        debugLog.push(`❌ DEBUG: Row ${i} has only ${cells.length} cells (need 7+)`);
                         if (cells.length > 0) {
                             // Show what cells we do have
                             for (let j = 0; j < cells.length; j++) {
-                                console.log(`DEBUG: Available cell ${j}: "${cells[j].textContent?.trim()}"`);
+                                debugLog.push(`DEBUG: Available cell ${j}: "${cells[j].textContent?.trim()}"`);
                             }
                         }
                     }
                 }
                 
-                console.log(`🎯 DEBUG: Extraction complete - found ${results.length} properties`);
-                return results;
+                debugLog.push(`🎯 DEBUG: Extraction complete - found ${results.length} properties`);
+                return { results, debugLog, success: true };
                 
             }, this.input.maxResults);
+
+            // Log all debug information
+            if (extractionResult.debugLog) {
+                for (const logEntry of extractionResult.debugLog) {
+                    this.logger.info(`EXTRACTION DEBUG: ${logEntry}`);
+                }
+            }
+
+            const extractedData = extractionResult.results || [];
 
             this.logger.info('Lightning table extraction completed', { propertiesFound: extractedData.length });
 
