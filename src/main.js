@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.7 - FINAL - PERFORMANCE-TUNED BATCH EXTRACTION
+ * Version: 1.0.8 - FINAL - RESILIENT PAGE LOAD & BATCH EXTRACTION
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -709,43 +709,40 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Navigate to projects page and wait for Lightning components to render
+     * Navigate to projects page with RESILIENT loading and component rendering.
      */
     async navigateToProjects(page) {
+        this.logger.info('Navigating to Sobha Projects page with retry logic');
+        
+        const currentUrl = page.url();
+        const baseUrl = currentUrl.split('/partnerportal')[0];
+        const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
+
         try {
-            this.logger.info('Navigating to Sobha Projects page');
-
-            // Wait for page to stabilize
-            await page.waitForTimeout(2000);
-
-            // Navigate directly to projects page
-            this.logger.info('Attempting direct navigation to projects page');
-            try {
-                const currentUrl = page.url();
-                const baseUrl = currentUrl.split('/partnerportal')[0];
-                const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
-                
-                this.logger.info(`Navigating directly to: ${projectsUrl}`);
-                await page.goto(projectsUrl, { 
-                    waitUntil: 'domcontentloaded',
-                    timeout: CONFIG.NAVIGATION_TIMEOUT 
-                });
-                
-                // CRITICAL: Wait for Lightning components to render
-                this.logger.info('Waiting for Lightning components to render');
-                await this.waitForLightningComponentsToRender(page);
-                
-                this.logger.info('✅ Direct navigation and Lightning rendering completed');
-                return true;
-                
-            } catch (directNavError) {
-                this.logger.warn('Direct navigation failed', { error: directNavError.message });
-                throw directNavError;
-            }
-
+            this.logger.info(`Attempt 1: Navigating to ${projectsUrl}`);
+            await page.goto(projectsUrl, { 
+                waitUntil: 'domcontentloaded',
+                timeout: CONFIG.NAVIGATION_TIMEOUT 
+            });
+            await this.waitForLightningComponentsToRender(page);
+            this.logger.info('✅ Projects page loaded and rendered on first attempt.');
+            return true;
         } catch (error) {
-            this.logger.error('Failed to navigate to projects page', { error: error.message });
-            throw error;
+            this.logger.warn('Initial navigation or rendering failed, attempting recovery.', { error: error.message });
+
+            // Recovery attempt
+            this.logger.info('Recovery: Reloading the page to fix potential component load issues.');
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: CONFIG.NAVIGATION_TIMEOUT });
+            
+            try {
+                this.logger.info('Attempt 2: Waiting for components to render after reload.');
+                await this.waitForLightningComponentsToRender(page);
+                this.logger.info('✅ Projects page loaded and rendered successfully after recovery reload.');
+                return true;
+            } catch (finalError) {
+                this.logger.error('FATAL: Component rendering failed even after a page reload.', { error: finalError.message });
+                throw new Error(`Could not load the projects page components correctly after a reload: ${finalError.message}`);
+            }
         }
     }
 
@@ -759,74 +756,70 @@ class EnterpriseSobhaPortalScraper {
             // Step 1: Wait for the main Lightning component to appear
             this.logger.debug('Waiting for main Lightning component');
             await page.waitForFunction(() => {
-                // Wait for the specific Sobha projects component
+                // Wait for the specific Sobha projects component OR a clear sign of content
                 const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
-                if (sobhaComponent) {
+                const filterComponent = document.querySelector('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter');
+
+                if (sobhaComponent || filterComponent) {
                     console.log('Sobha Lightning component found');
                     return true;
                 }
                 
-                // Also check for general Lightning content
+                // Also check for general Lightning content as a fallback
                 const lightningContent = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
                 console.log(`Found ${lightningContent.length} Lightning elements`);
-                return lightningContent.length > 50; // Substantial Lightning content
+                return lightningContent.length > 150; // Increased threshold for a more definitive sign of a rendered page
             }, {}, { timeout: 30000 });
 
-            // Step 2: Wait for UI elements to be rendered inside the component
+            // Step 2: Wait for UI elements to be rendered and interactive inside the component
             this.logger.debug('Waiting for UI content to render inside Lightning components');
             await page.waitForFunction(() => {
-                // Check for any buttons or interactive elements
-                const buttons = document.querySelectorAll('button');
-                const inputs = document.querySelectorAll('input');
-                const clickables = document.querySelectorAll('[onclick], [role="button"]');
+                // We need to find clickable elements that signal the page is ready.
+                // The "Filter Properties" is an <a> tag, so we must include it.
+                const clickables = document.querySelectorAll('button, a[role="button"], a.btn, lightning-button');
                 
-                const totalInteractive = buttons.length + inputs.length + clickables.length;
-                console.log(`Found ${totalInteractive} interactive elements`);
+                const totalInteractive = clickables.length;
+                console.log(`Found ${totalInteractive} key interactive elements`);
                 
-                // Also check for specific filter-related content
+                // Check for the text that is our main goal
                 const bodyText = document.body.textContent || '';
-                const hasFilterContent = bodyText.includes('Filter') || bodyText.includes('Properties') || bodyText.includes('Search');
+                const hasFilterContent = bodyText.includes('Filter Properties') || bodyText.includes('Apply Filter');
                 
                 console.log(`Has filter content: ${hasFilterContent}`);
-                console.log(`Total interactive elements: ${totalInteractive}`);
+                console.log(`Total key interactive elements: ${totalInteractive}`);
                 
-                return totalInteractive >= 5 && hasFilterContent;
+                // A reliable page has at least one button/link and the filter text
+                return totalInteractive >= 1 && hasFilterContent;
             }, {}, { timeout: 45000 });
 
             // Step 3: Additional wait for any final rendering
             this.logger.debug('Allowing extra time for final component rendering');
             await page.waitForTimeout(5000);
 
-            // Step 4: Verify components are ready
+            // Step 4: Final verification
             const componentStatus = await page.evaluate(() => {
-                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
-                const buttons = document.querySelectorAll('button');
+                const buttons = document.querySelectorAll('button, a.btn, lightning-button');
                 const bodyText = document.body.textContent || '';
                 
                 return {
-                    hasSobhaComponent: !!sobhaComponent,
                     buttonCount: buttons.length,
-                    hasFilterText: bodyText.includes('Filter'),
-                    hasPropertiesText: bodyText.includes('Properties'),
+                    hasFilterPropertiesText: bodyText.includes('Filter Properties'),
                     contentLength: bodyText.length
                 };
             });
 
-            this.logger.info('Lightning component rendering completed', componentStatus);
+            this.logger.info('Lightning component rendering check completed', componentStatus);
 
-            if (componentStatus.buttonCount === 0) {
-                throw new Error('No buttons found after Lightning rendering - components may not have loaded properly');
+            if (!componentStatus.hasFilterPropertiesText) {
+                throw new Error('Page loaded, but the critical "Filter Properties" text was not found in the DOM.');
             }
 
             return true;
 
         } catch (error) {
-            this.logger.error('Lightning component rendering failed', { error: error.message });
-            
-            // Don't fail completely - log the issue but continue
-            this.logger.warn('Continuing despite Lightning rendering issues');
-            await page.waitForTimeout(10000); // Extra wait as fallback
-            return false;
+            this.logger.error('waitForLightningComponentsToRender failed', { error: error.message });
+            // Re-throw the error so the calling function (navigateToProjects) can catch it and initiate recovery.
+            throw error;
         }
     }
 
@@ -1098,34 +1091,39 @@ class EnterpriseSobhaPortalScraper {
                     const currentRowLocator = rowLocator.nth(j);
                     
                     const processRow = async () => {
-                        const cells = await currentRowLocator.locator('td').all();
-                        if (cells.length < 7) return null;
+                        try {
+                            const cells = await currentRowLocator.locator('td').all();
+                            if (cells.length < 7) return null;
 
-                        const cellTexts = await Promise.all(cells.map(async (cell) => {
-                            const truncateDiv = cell.locator('.slds-truncate');
-                            if (await truncateDiv.count() > 0) {
-                                return (await truncateDiv.first().textContent() || '').trim();
-                            }
-                            return (await cell.textContent() || '').trim();
-                        }));
+                            const cellTexts = await Promise.all(cells.map(async (cell) => {
+                                const truncateDiv = cell.locator('.slds-truncate');
+                                if (await truncateDiv.count() > 0) {
+                                    return (await truncateDiv.first().textContent() || '').trim();
+                                }
+                                return (await cell.textContent() || '').trim();
+                            }));
 
-                        if (!cellTexts.some(text => text && text.length > 0)) return null;
+                            if (!cellTexts.some(text => text && text.length > 0)) return null;
 
-                        return {
-                            unitId: `sobha_batch_${Date.now()}_${j}`,
-                            project: cellTexts[0] || 'Unknown Project',
-                            subProject: cellTexts[1] || '',
-                            unitType: cellTexts[2] || '',
-                            floor: cellTexts[3] || '',
-                            unitNo: cellTexts[4] || `Unit-${j + 1}`,
-                            totalUnitArea: cellTexts[5] || '',
-                            startingPrice: cellTexts[6] || '',
-                            availability: 'available',
-                            sourceUrl: page.url(),
-                            extractionMethod: 'Playwright-Batched-Iteration',
-                            rawCellData: cellTexts,
-                            scrapedAt: new Date().toISOString(),
-                        };
+                            return {
+                                unitId: `sobha_batch_${Date.now()}_${j}`,
+                                project: cellTexts[0] || 'Unknown Project',
+                                subProject: cellTexts[1] || '',
+                                unitType: cellTexts[2] || '',
+                                floor: cellTexts[3] || '',
+                                unitNo: cellTexts[4] || `Unit-${j + 1}`,
+                                totalUnitArea: cellTexts[5] || '',
+                                startingPrice: cellTexts[6] || '',
+                                availability: 'available',
+                                sourceUrl: page.url(),
+                                extractionMethod: 'Playwright-Batched-Iteration',
+                                rawCellData: cellTexts,
+                                scrapedAt: new Date().toISOString(),
+                            };
+                        } catch(rowError) {
+                            this.logger.warn(`Could not process row index ${j}. It might have become detached from the DOM.`, {error: rowError.message});
+                            return null;
+                        }
                     };
                     batchPromises.push(processRow());
                 }
@@ -1136,7 +1134,6 @@ class EnterpriseSobhaPortalScraper {
                 if (validPropertiesInBatch.length > 0) {
                     allProperties.push(...validPropertiesInBatch);
                     this.metrics.recordPropertiesScraped(validPropertiesInBatch.length);
-                    // No need to push to dataset here, do it once at the end.
                 }
 
                 this.logger.info(`Batch complete. Total properties scraped so far: ${allProperties.length}`);
@@ -1179,7 +1176,7 @@ class EnterpriseSobhaPortalScraper {
                 unitNo: 'ERROR-LIGHTNING-001',
                 totalUnitArea: '0',
                 startingPrice: '0',
-availability: 'error',
+                availability: 'error',
                 sourceUrl: page.url(),
                 errorInfo: error.message,
                 extractionMethod: 'Lightning-Error-Fallback',
@@ -1274,7 +1271,7 @@ availability: 'error',
                         
                         // Metadata
                         metadata: {
-                            scraperVersion: '1.0.7',
+                            scraperVersion: '1.0.8',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
