@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.9 - STABLE - Resilient Load + Batched Extraction
+ * Version: 1.0.5 - FIXED LIGHTNING TABLE EXTRACTION
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -197,7 +197,7 @@ class MetricsCollector {
     }
 
     recordPropertiesScraped(count) {
-        this.metrics.propertiesScraped += count; // Use += for batch processing
+        this.metrics.propertiesScraped = count;
     }
 
     recordMemoryUsage() {
@@ -709,85 +709,124 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * Navigate to projects page with RESILIENT loading and component rendering.
+     * Navigate to projects page and wait for Lightning components to render
      */
     async navigateToProjects(page) {
-        this.logger.info('Navigating to Sobha Projects page with retry logic');
-        
-        const currentUrl = page.url();
-        const baseUrl = currentUrl.split('/partnerportal')[0];
-        const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
-
         try {
-            this.logger.info(`Attempt 1: Navigating to ${projectsUrl}`);
-            await page.goto(projectsUrl, { 
-                waitUntil: 'domcontentloaded',
-                timeout: CONFIG.NAVIGATION_TIMEOUT 
-            });
-            await this.waitForLightningComponentsToRender(page);
-            this.logger.info('✅ Projects page loaded and rendered on first attempt.');
-            return true;
-        } catch (error) {
-            this.logger.warn('Initial navigation or rendering failed, attempting recovery.', { error: error.message });
+            this.logger.info('Navigating to Sobha Projects page');
 
-            // Recovery attempt
-            this.logger.info('Recovery: Reloading the page to fix potential component load issues.');
-            await page.reload({ waitUntil: 'domcontentloaded', timeout: CONFIG.NAVIGATION_TIMEOUT });
-            
+            // Wait for page to stabilize
+            await page.waitForTimeout(2000);
+
+            // Navigate directly to projects page
+            this.logger.info('Attempting direct navigation to projects page');
             try {
-                this.logger.info('Attempt 2: Waiting for components to render after reload.');
+                const currentUrl = page.url();
+                const baseUrl = currentUrl.split('/partnerportal')[0];
+                const projectsUrl = `${baseUrl}/partnerportal/s/sobha-project`;
+                
+                this.logger.info(`Navigating directly to: ${projectsUrl}`);
+                await page.goto(projectsUrl, { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: CONFIG.NAVIGATION_TIMEOUT 
+                });
+                
+                // CRITICAL: Wait for Lightning components to render
+                this.logger.info('Waiting for Lightning components to render');
                 await this.waitForLightningComponentsToRender(page);
-                this.logger.info('✅ Projects page loaded and rendered successfully after recovery reload.');
+                
+                this.logger.info('✅ Direct navigation and Lightning rendering completed');
                 return true;
-            } catch (finalError) {
-                this.logger.error('FATAL: Component rendering failed even after a page reload.', { error: finalError.message });
-                throw new Error(`Could not load the projects page components correctly after a reload: ${finalError.message}`);
+                
+            } catch (directNavError) {
+                this.logger.warn('Direct navigation failed', { error: directNavError.message });
+                throw directNavError;
             }
+
+        } catch (error) {
+            this.logger.error('Failed to navigate to projects page', { error: error.message });
+            throw error;
         }
     }
 
     /**
-     * Reverted to the simpler, working version of the component wait logic.
+     * NEW: Wait for Lightning components to fully render
      */
     async waitForLightningComponentsToRender(page) {
         try {
-            this.logger.info('Waiting for Lightning components to fully render (stable logic)');
+            this.logger.info('Waiting for Lightning components to fully render');
 
-            // Step 1: Wait for main component using original, reliable logic
+            // Step 1: Wait for the main Lightning component to appear
             this.logger.debug('Waiting for main Lightning component');
             await page.waitForFunction(() => {
+                // Wait for the specific Sobha projects component
                 const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
-                if (sobhaComponent) return true;
+                if (sobhaComponent) {
+                    console.log('Sobha Lightning component found');
+                    return true;
+                }
                 
+                // Also check for general Lightning content
                 const lightningContent = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
-                return lightningContent.length > 50; // Original threshold
+                console.log(`Found ${lightningContent.length} Lightning elements`);
+                return lightningContent.length > 50; // Substantial Lightning content
             }, {}, { timeout: 30000 });
 
-            // Step 2: Wait for UI content using original, reliable logic
+            // Step 2: Wait for UI elements to be rendered inside the component
             this.logger.debug('Waiting for UI content to render inside Lightning components');
             await page.waitForFunction(() => {
+                // Check for any buttons or interactive elements
                 const buttons = document.querySelectorAll('button');
                 const inputs = document.querySelectorAll('input');
                 const clickables = document.querySelectorAll('[onclick], [role="button"]');
-                const totalInteractive = buttons.length + inputs.length + clickables.length;
                 
+                const totalInteractive = buttons.length + inputs.length + clickables.length;
+                console.log(`Found ${totalInteractive} interactive elements`);
+                
+                // Also check for specific filter-related content
                 const bodyText = document.body.textContent || '';
                 const hasFilterContent = bodyText.includes('Filter') || bodyText.includes('Properties') || bodyText.includes('Search');
+                
+                console.log(`Has filter content: ${hasFilterContent}`);
+                console.log(`Total interactive elements: ${totalInteractive}`);
                 
                 return totalInteractive >= 5 && hasFilterContent;
             }, {}, { timeout: 45000 });
 
-            // Step 3: Additional stabilization wait
+            // Step 3: Additional wait for any final rendering
             this.logger.debug('Allowing extra time for final component rendering');
             await page.waitForTimeout(5000);
-            
-            this.logger.info('Component rendering wait completed successfully.');
+
+            // Step 4: Verify components are ready
+            const componentStatus = await page.evaluate(() => {
+                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
+                const buttons = document.querySelectorAll('button');
+                const bodyText = document.body.textContent || '';
+                
+                return {
+                    hasSobhaComponent: !!sobhaComponent,
+                    buttonCount: buttons.length,
+                    hasFilterText: bodyText.includes('Filter'),
+                    hasPropertiesText: bodyText.includes('Properties'),
+                    contentLength: bodyText.length
+                };
+            });
+
+            this.logger.info('Lightning component rendering completed', componentStatus);
+
+            if (componentStatus.buttonCount === 0) {
+                throw new Error('No buttons found after Lightning rendering - components may not have loaded properly');
+            }
+
             return true;
 
         } catch (error) {
-            this.logger.error('waitForLightningComponentsToRender failed', { error: error.message });
-            // Re-throw the error so the calling function (navigateToProjects) can catch it and initiate recovery.
-            throw error;
+            this.logger.error('Lightning component rendering failed', { error: error.message });
+            
+            // Don't fail completely - log the issue but continue
+            this.logger.warn('Continuing despite Lightning rendering issues');
+            await page.waitForTimeout(10000); // Extra wait as fallback
+            return false;
         }
     }
 
@@ -801,36 +840,124 @@ class EnterpriseSobhaPortalScraper {
             // Wait for Lightning components to be fully interactive
             await page.waitForTimeout(3000);
 
+            // DEBUGGING: Analyze what's actually on the page AFTER modal dismissal and Lightning rendering
+            this.logger.info('Analyzing page content after modal dismissal and Lightning rendering');
+            const pageAnalysis = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const links = Array.from(document.querySelectorAll('a'));
+                const inputs = Array.from(document.querySelectorAll('input'));
+                const allClickables = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [onclick], [role="button"], a, a.btn'));
+                
+                // Look specifically for Lightning component content
+                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
+                const sobhaFilterComponent = document.querySelector('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter, [c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]');
+                const lightningElements = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
+                
+                return {
+                    totalButtons: buttons.length,
+                    totalLinks: links.length,
+                    totalInputs: inputs.length,
+                    totalClickables: allClickables.length,
+                    hasSobhaComponent: !!sobhaComponent,
+                    hasSobhaFilterComponent: !!sobhaFilterComponent,
+                    lightningElementCount: lightningElements.length,
+                    buttonTexts: buttons.map(btn => btn.textContent?.trim()).filter(text => text && text.length > 0),
+                    linkTexts: links.map(link => link.textContent?.trim()).filter(text => text && text.length > 0),
+                    inputValues: inputs.map(inp => inp.value?.trim() || inp.placeholder?.trim()).filter(text => text && text.length > 0),
+                    clickableTexts: allClickables.map(el => el.textContent?.trim() || el.value?.trim() || el.getAttribute('aria-label')).filter(text => text && text.length > 0),
+                    pageText: document.body.textContent?.includes('Filter') ? 'Contains Filter text' : 'No Filter text found',
+                    pageTitle: document.title,
+                    currentUrl: window.location.href,
+                    
+                    // Check for remaining modals (including Lightning component modal)
+                    visibleModals: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal, [c-brokerportalhomepage_brokerportalhomepage]'))
+                        .filter(modal => modal.offsetParent !== null).length,
+                    modalInfo: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal, [c-brokerportalhomepage_brokerportalhomepage]'))
+                        .filter(modal => modal.offsetParent !== null)
+                        .map(modal => ({
+                            className: modal.className,
+                            componentName: modal.getAttribute('c-brokerportalhomepage_brokerportalhomepage') ? 'Lightning-HomePage' : 'Standard',
+                            textContent: (modal.textContent || '').substring(0, 100)
+                        })),
+                    
+                    // Sample of actual elements for debugging
+                    buttonSample: buttons.slice(0, 3).map(btn => ({
+                        text: btn.textContent?.trim(),
+                        value: btn.value,
+                        className: btn.className,
+                        id: btn.id,
+                        type: btn.type,
+                        visible: btn.offsetParent !== null
+                    })),
+                    linkSample: links.slice(0, 5).map(link => ({
+                        text: link.textContent?.trim(),
+                        className: link.className,
+                        id: link.id,
+                        href: link.href,
+                        dataElement: link.getAttribute('data-element'),
+                        lightningComponent: link.getAttribute('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter') ? 'Filter-Component' : null,
+                        visible: link.offsetParent !== null
+                    }))
+                };
+            });
+
+            this.logger.info('Lightning-aware page analysis completed', pageAnalysis);
+
             // Find and click the "Filter Properties" button
             this.logger.info('Looking for Filter Properties button with Lightning awareness');
             
             try {
-                // Enhanced selector targeting Lightning-rendered content
+                // Enhanced selector targeting Lightning-rendered content (FIXED: target <a> tags)
                 const lightningFilterSelectors = [
-                    'a[data-element="general-enquiry"]:has-text("Filter Properties")', // Most reliable from previous logs
-                    'a:has-text("Filter Properties")',
-                    'a.btn:has-text("Filter Properties")',
+                    // Target the exact Lightning component from HTML inspection
                     'a[c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]:has-text("Filter Properties")',
+                    'a[data-element="general-enquiry"]:has-text("Filter Properties")',
+                    'a.btn.mt-4:has-text("Filter Properties")',
+                    
+                    // Standard <a> tag text selectors
+                    'a:has-text("Filter Properties")',
+                    'a:has-text("Filter")',
+                    
+                    // Lightning-specific <a> tag selectors  
                     'lightning-button:has-text("Filter Properties")',
+                    'lightning-button:has-text("Filter")',
+                    
+                    // Aura component <a> tags
+                    '[data-aura-class*="button"]:has-text("Filter")',
+                    
+                    // SLDS (Salesforce Lightning Design System) <a> tags
+                    '.slds-button:has-text("Filter")',
+                    '.btn:has-text("Filter Properties")',
                     '.btn:has-text("Filter")',
+                    
+                    // Fallback to button tags (original selectors)
                     'button:has-text("Filter Properties")',
                     'button:has-text("Filter")',
+                    'button:has-text("Apply")',
+                    'button:has-text("Search")',
+                    
+                    // Try different case variations for <a> tags
+                    'a:has-text("FILTER PROPERTIES")',
+                    'a:has-text("filter properties")',
+                    'a:has-text("Apply Filter")',
+                    'a:has-text("Search Properties")'
                 ];
 
                 let buttonFound = false;
                 for (const selector of lightningFilterSelectors) {
                     try {
                         this.logger.debug(`Trying Lightning selector: ${selector}`);
-                        const buttonLocator = page.locator(selector);
                         
-                        await buttonLocator.waitFor({ 
+                        // Wait for the element with a reasonable timeout
+                        await page.waitForSelector(selector, { 
                             timeout: 5000,
                             state: 'visible'
                         });
 
                         this.logger.info(`Found button with Lightning selector: ${selector}`);
                         
-                        await buttonLocator.click({timeout: 10000});
+                        // Click the button
+                        await page.click(selector);
                         buttonFound = true;
                         break;
                         
@@ -840,21 +967,89 @@ class EnterpriseSobhaPortalScraper {
                 }
 
                 if (buttonFound) {
+                    // Wait for modal to appear
                     this.logger.info('Button clicked, waiting for property modal to load');
+                    
+                    // Wait for modal using standard CSS selectors
                     await page.waitForSelector('[role="dialog"], .slds-modal', { 
                         timeout: CONFIG.MODAL_WAIT,
                         state: 'visible'
                     });
+
+                    // Additional wait for modal content to load
                     await page.waitForTimeout(3000);
+
                     this.logger.info('✅ Property modal opened successfully');
                     return true;
                 } else {
-                    throw new Error('No Lightning filter button selectors worked after successful page render.');
+                    throw new Error('No Lightning filter button selectors worked');
                 }
 
             } catch (buttonError) {
-                this.logger.error('Lightning-aware button detection failed', { error: buttonError.message });
-                throw new Error(`Could not find or click Filter Properties button: ${buttonError.message}`);
+                this.logger.error('Lightning-aware button detection failed', { 
+                    error: buttonError.message 
+                });
+                
+                // FINAL ATTEMPT: Use JavaScript to find and click any filter-related button
+                this.logger.info('Trying comprehensive JavaScript button detection');
+                try {
+                    const filterButtonClicked = await page.evaluate(() => {
+                        console.log('Starting comprehensive button search...');
+                        
+                        // Get all potentially clickable elements (including <a> tags)
+                        const allElements = Array.from(document.querySelectorAll(
+                            'button, input[type="button"], input[type="submit"], [role="button"], [onclick], lightning-button, a, a.btn'
+                        ));
+                        
+                        console.log(`Found ${allElements.length} potentially clickable elements`);
+                        
+                        for (const element of allElements) {
+                            const text = (element.textContent || element.value || '').toLowerCase();
+                            const ariaLabel = (element.getAttribute('aria-label') || '').toLowerCase();
+                            const className = (element.className || '').toLowerCase();
+                            const id = (element.id || '').toLowerCase();
+                            
+                            // Look for filter-related keywords
+                            const searchTerms = ['filter', 'search', 'apply', 'properties', 'submit'];
+                            const hasFilterKeyword = searchTerms.some(term => 
+                                text.includes(term) || ariaLabel.includes(term) || className.includes(term) || id.includes(term)
+                            );
+                            
+                            if (hasFilterKeyword && element.offsetParent !== null) { // Visible element
+                                console.log(`Found potential filter button: "${text || ariaLabel || className}" - attempting click`);
+                                
+                                try {
+                                    element.click();
+                                    console.log('Button clicked successfully');
+                                    return true;
+                                } catch (clickError) {
+                                    console.log(`Click failed: ${clickError}`);
+                                }
+                            }
+                        }
+                        
+                        console.log('No suitable filter button or link found');
+                        return false;
+                    });
+                    
+                    if (filterButtonClicked) {
+                        this.logger.info('Filter button clicked via JavaScript');
+                        await page.waitForTimeout(5000);
+                        
+                        // Check if modal appeared
+                        const modalCount = await page.locator('[role="dialog"], .slds-modal').count();
+                        if (modalCount > 0) {
+                            this.logger.info('✅ Modal opened with JavaScript button detection');
+                            return true;
+                        } else {
+                            this.logger.warn('Button was clicked but no modal appeared');
+                        }
+                    }
+                } catch (jsError) {
+                    this.logger.debug('JavaScript button detection failed', { error: jsError.message });
+                }
+                
+                throw new Error('Could not find or click Filter Properties button/link after comprehensive Lightning-aware search');
             }
 
         } catch (error) {
@@ -864,118 +1059,256 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Extract property data from Lightning table using BATCHED Playwright locators for performance
+     * FIXED: Extract property data from Lightning table
      */
     async extractPropertyData(page) {
         try {
-            this.logger.info('Starting batched/parallel extraction using Playwright locators');
-            const BATCH_SIZE = 50; // Process 50 rows in parallel at a time
+            this.logger.info('Starting Lightning table-based property data extraction');
 
-            // Wait for the modal and a table body within it to be stable.
+            // FIXED: Wait for table to appear, then extract immediately (no 25-second wait)
             this.logger.info('Waiting for Lightning property data table to load in modal...');
-            const tableBodyLocator = page.locator('.slds-modal .customFilterTable tbody, .slds-modal table tbody').first();
-            await tableBodyLocator.waitFor({ state: 'visible', timeout: 30000 });
-            this.logger.info('✅ Lightning property data table found in modal');
+            
+            try {
+                // FIXED: Use correct selector based on HTML structure shown in images
+                await page.waitForSelector('.slds-modal table tbody', { 
+                    timeout: 30000,
+                    state: 'visible'
+                });
+                
+                this.logger.info('✅ Lightning property data table found in modal');
+                
+            } catch (tableWaitError) {
+                this.logger.warn('Lightning table selector failed, trying alternative approach');
+                
+                // Alternative: wait for any table-like structure
+                try {
+                    await page.waitForSelector('.slds-modal .customFilterTable', { 
+                        timeout: 15000,
+                        state: 'visible'
+                    });
+                    this.logger.info('✅ Alternative Lightning table structure found');
+                } catch (altTableError) {
+                    this.logger.error('No Lightning table found in modal after waiting', { error: altTableError.message });
+                    throw new Error('Lightning property data table did not load in modal within timeout');
+                }
+            }
 
-            // Allow a brief moment for all rows to render after the tbody is visible.
+            // FIXED: Extract data immediately while modal is still open (no 25-second wait)
+            this.logger.info('Modal and table detected - extracting data immediately to prevent auto-close');
+            
+            // Short wait for content stability (3 seconds instead of 25)
             await page.waitForTimeout(3000);
 
-            const allProperties = [];
-            const rowLocator = tableBodyLocator.locator('tr');
-            const rowCount = await rowLocator.count();
-            const totalToProcess = Math.min(rowCount, this.input.maxResults);
-
-            this.logger.info(`Found ${rowCount} rows. Processing ${totalToProcess} in batches of ${BATCH_SIZE}.`);
-
-            if (rowCount === 0) {
-                this.logger.warn('Table body was found, but it contains 0 rows.');
-            }
-
-            for (let i = 0; i < totalToProcess; i += BATCH_SIZE) {
-                const batchStart = i;
-                const batchEnd = Math.min(i + BATCH_SIZE, totalToProcess);
-                const batchPromises = [];
-
-                this.logger.info(`Processing batch: rows ${batchStart + 1} to ${batchEnd}`);
+            // ENHANCED DEBUG: Extract data with comprehensive logging
+            const extractionResult = await page.evaluate((maxResults) => {
+                const debugLog = [];
+                const results = [];
                 
-                for (let j = batchStart; j < batchEnd; j++) {
-                    const currentRowLocator = rowLocator.nth(j);
+                debugLog.push('🚀 DEBUG: Starting extraction evaluation');
+                
+                // STEP 1: Comprehensive modal detection
+                debugLog.push('🔍 DEBUG: Step 1 - Finding modal');
+                
+                const dialogModals = document.querySelectorAll('[role="dialog"]');
+                const sldsModals = document.querySelectorAll('.slds-modal');
+                const allModals = [...dialogModals, ...sldsModals];
+                
+                debugLog.push(`DEBUG: Found ${dialogModals.length} dialog modals, ${sldsModals.length} slds modals`);
+                
+                let modal = null;
+                for (let i = 0; i < allModals.length; i++) {
+                    const m = allModals[i];
+                    const isVisible = m.offsetParent !== null;
+                    debugLog.push(`DEBUG: Modal ${i}: visible=${isVisible}, classes="${m.className}"`);
+                    if (isVisible) {
+                        modal = m;
+                        debugLog.push(`✅ DEBUG: Using modal ${i} as active modal`);
+                        break;
+                    }
+                }
+                
+                if (!modal) {
+                    debugLog.push('❌ DEBUG: No visible modal found after checking all modals');
+                    return { results, debugLog, error: 'No visible modal found' };
+                }
+                
+                // STEP 2: Table detection with multiple strategies
+                debugLog.push('🔍 DEBUG: Step 2 - Finding table in modal');
+                
+                const tableSelectors = [
+                    'table.customFilterTable',
+                    '.customFilterTable',
+                    'table',
+                    '.slds-table',
+                    '[role="table"]'
+                ];
+                
+                let table = null;
+                for (const selector of tableSelectors) {
+                    table = modal.querySelector(selector);
+                    if (table) {
+                        debugLog.push(`✅ DEBUG: Found table with selector: ${selector}`);
+                        break;
+                    } else {
+                        debugLog.push(`❌ DEBUG: No table found with selector: ${selector}`);
+                    }
+                }
+                
+                if (!table) {
+                    debugLog.push('❌ DEBUG: No table found with any selector');
+                    debugLog.push(`DEBUG: Modal content preview: ${modal.innerHTML.substring(0, 500)}`);
+                    return { results, debugLog, error: 'No table found' };
+                }
+                
+                // STEP 3: Tbody detection
+                debugLog.push('🔍 DEBUG: Step 3 - Finding tbody');
+                const tbody = table.querySelector('tbody');
+                if (!tbody) {
+                    debugLog.push('❌ DEBUG: No tbody found in table');
+                    debugLog.push(`DEBUG: Table content preview: ${table.innerHTML.substring(0, 500)}`);
+                    return { results, debugLog, error: 'No tbody found' };
+                }
+                debugLog.push('✅ DEBUG: Tbody found');
+                
+                // STEP 4: Row detection
+                debugLog.push('🔍 DEBUG: Step 4 - Finding rows');
+                const rowSelectors = ['tr.slds-hint-parent', 'tr'];
+                let rows = [];
+                
+                for (const selector of rowSelectors) {
+                    rows = tbody.querySelectorAll(selector);
+                    if (rows.length > 0) {
+                        debugLog.push(`✅ DEBUG: Found ${rows.length} rows with selector: ${selector}`);
+                        break;
+                    } else {
+                        debugLog.push(`❌ DEBUG: No rows found with selector: ${selector}`);
+                    }
+                }
+                
+                if (rows.length === 0) {
+                    debugLog.push('❌ DEBUG: No rows found with any selector');
+                    debugLog.push(`DEBUG: Tbody content preview: ${tbody.innerHTML.substring(0, 500)}`);
+                    return { results, debugLog, error: 'No rows found' };
+                }
+                
+                // STEP 5: Process rows
+                debugLog.push('🔍 DEBUG: Step 5 - Processing rows');
+                for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
+                    debugLog.push(`DEBUG: Processing row ${i}`);
+                    const row = rows[i];
+                    const cells = row.querySelectorAll('td');
                     
-                    const processRow = async () => {
-                        try {
-                            const cells = await currentRowLocator.locator('td').all();
-                            if (cells.length < 7) return null;
-
-                            const cellTexts = await Promise.all(cells.map(async (cell) => {
-                                const truncateDiv = cell.locator('.slds-truncate');
-                                if (await truncateDiv.count() > 0) {
-                                    return (await truncateDiv.first().textContent() || '').trim();
-                                }
-                                return (await cell.textContent() || '').trim();
-                            }));
-
-                            if (!cellTexts.some(text => text && text.length > 0)) return null;
-
-                            return {
-                                unitId: `sobha_batch_${Date.now()}_${j}`,
-                                project: cellTexts[0] || 'Unknown Project',
-                                subProject: cellTexts[1] || '',
-                                unitType: cellTexts[2] || '',
-                                floor: cellTexts[3] || '',
-                                unitNo: cellTexts[4] || `Unit-${j + 1}`,
-                                totalUnitArea: cellTexts[5] || '',
-                                startingPrice: cellTexts[6] || '',
-                                availability: 'available',
-                                sourceUrl: page.url(),
-                                extractionMethod: 'Playwright-Batched-Iteration',
-                                rawCellData: cellTexts,
-                                scrapedAt: new Date().toISOString(),
-                            };
-                        } catch(rowError) {
-                            this.logger.warn(`Could not process row index ${j}. It might have become detached from the DOM.`, {error: rowError.message});
-                            return null;
+                    debugLog.push(`DEBUG: Row ${i} has ${cells.length} cells`);
+                    
+                    if (cells.length >= 7) {
+                        // Extract text from each cell
+                        const cellTexts = [];
+                        for (let cellIndex = 0; cellIndex < cells.length; cellIndex++) {
+                            const cell = cells[cellIndex];
+                            const truncateDiv = cell.querySelector('.slds-truncate');
+                            const directText = cell.textContent?.trim() || '';
+                            const truncateText = truncateDiv ? truncateDiv.textContent?.trim() || '' : '';
+                            const finalText = truncateText || directText;
+                            
+                            cellTexts.push(finalText);
+                            debugLog.push(`DEBUG: Cell ${cellIndex}: "${finalText}" (truncate: "${truncateText}", direct: "${directText}")`);
                         }
-                    };
-                    batchPromises.push(processRow());
+                        
+                        const property = {
+                            unitId: `sobha_lightning_debug_${Date.now()}_${i}`,
+                            project: cellTexts[0] || 'Unknown Project',
+                            subProject: cellTexts[1] || '',
+                            unitType: cellTexts[2] || '',
+                            floor: cellTexts[3] || '',
+                            unitNo: cellTexts[4] || `Unit-${i + 1}`,
+                            totalUnitArea: cellTexts[5] || '',
+                            startingPrice: cellTexts[6] || '',
+                            availability: 'available',
+                            sourceUrl: window.location.href,
+                            extractionMethod: 'Lightning-Enhanced-Debug',
+                            rawCellData: cellTexts,
+                            scrapedAt: new Date().toISOString(),
+                            debugInfo: {
+                                cellCount: cells.length,
+                                rowIndex: i,
+                                hasValidProject: !!(cellTexts[0] && cellTexts[0] !== 'Unknown Project' && cellTexts[0].length > 0)
+                            }
+                        };
+                        
+                        // Very lenient filtering - accept any row with some data
+                        if (cellTexts.some(text => text && text.length > 0)) {
+                            results.push(property);
+                            debugLog.push(`✅ DEBUG: Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
+                        } else {
+                            debugLog.push(`❌ DEBUG: Skipped row ${i} - no meaningful data found`);
+                        }
+                    } else {
+                        debugLog.push(`❌ DEBUG: Row ${i} has only ${cells.length} cells (need 7+)`);
+                        if (cells.length > 0) {
+                            // Show what cells we do have
+                            for (let j = 0; j < cells.length; j++) {
+                                debugLog.push(`DEBUG: Available cell ${j}: "${cells[j].textContent?.trim()}"`);
+                            }
+                        }
+                    }
                 }
-
-                const batchResults = await Promise.all(batchPromises);
-                const validPropertiesInBatch = batchResults.filter(p => p !== null);
                 
-                if (validPropertiesInBatch.length > 0) {
-                    allProperties.push(...validPropertiesInBatch);
-                    this.metrics.recordPropertiesScraped(validPropertiesInBatch.length);
-                }
+                debugLog.push(`🎯 DEBUG: Extraction complete - found ${results.length} properties`);
+                return { results, debugLog, success: true };
+                
+            }, this.input.maxResults);
 
-                this.logger.info(`Batch complete. Total properties scraped so far: ${allProperties.length}`);
+            // Log all debug information
+            if (extractionResult.debugLog) {
+                for (const logEntry of extractionResult.debugLog) {
+                    this.logger.info(`EXTRACTION DEBUG: ${logEntry}`);
+                }
             }
 
+            const extractedData = extractionResult.results || [];
 
-            this.logger.info('Batched extraction completed', { totalPropertiesFound: allProperties.length });
+            this.logger.info('Lightning table extraction completed', { propertiesFound: extractedData.length });
 
-            // If no properties found after all batches, create a debug entry
-            if (allProperties.length === 0 && rowCount > 0) {
-                this.logger.warn('No valid property data extracted despite rows being present - creating debug entry');
-                allProperties.push({
-                    unitId: `debug_playwright_modal_${Date.now()}`,
-                    project: 'Playwright Modal Debug Entry',
-                    subProject: `No Properties Found (inspected ${rowCount} rows)`,
+            // If no properties found, create debug entry
+            if (extractedData.length === 0) {
+                this.logger.warn('No Lightning property data found in modal - creating debug entry');
+                
+                extractedData.push({
+                    unitId: `debug_lightning_modal_${Date.now()}`,
+                    project: 'Lightning Modal Debug Entry',
+                    subProject: 'No Properties Found',
                     unitType: 'Debug',
                     floor: '0',
-                    unitNo: 'DEBUG-PLAYWRIGHT-001',
+                    unitNo: 'DEBUG-LIGHTNING-001',
                     totalUnitArea: '0',
                     startingPrice: '0',
                     availability: 'debug',
                     sourceUrl: page.url(),
-                    extractionMethod: 'Playwright-Debug-Batched',
+                    debugInfo: {
+                        message: 'No Lightning property data found in modal'
+                    },
+                    extractionMethod: 'Lightning-Debug',
                     scrapedAt: new Date().toISOString()
                 });
             }
+
+            // Validate extracted data
+            const validProperties = extractedData.filter(prop => 
+                prop.unitId && prop.project && prop.unitNo
+            );
+
+            this.metrics.recordPropertiesScraped(validProperties.length);
             
-            return allProperties;
+            this.logger.info('Lightning modal property data extraction completed', {
+                totalExtracted: extractedData.length,
+                validProperties: validProperties.length,
+                extractionMethods: [...new Set(extractedData.map(p => p.extractionMethod))]
+            });
+
+            return validProperties;
 
         } catch (error) {
-            this.logger.error('Playwright-based batched extraction failed', { error: error.message, stack: error.stack });
+            this.logger.error('Lightning modal property data extraction failed', { error: error.message });
             
             // Return error entry
             return [{
@@ -996,17 +1329,13 @@ class EnterpriseSobhaPortalScraper {
         }
     }
 
-
     /**
      * Main enhanced scraping workflow with Lightning table extraction
      */
     async executeScraping() {
-        // Increase the request handler timeout to give batch processing enough time
-        const requestHandlerTimeoutSecs = Math.max(CONFIG.REQUEST_TIMEOUT / 1000, 900); // at least 15 mins
-
         const crawler = new PlaywrightCrawler({
             maxRequestsPerCrawl: 1,
-            requestHandlerTimeoutSecs, // Use the adjusted timeout
+            requestHandlerTimeoutSecs: CONFIG.REQUEST_TIMEOUT / 1000,
             maxConcurrency: this.input.parallelRequests,
             launchContext: {
                 launchOptions: {
@@ -1082,7 +1411,7 @@ class EnterpriseSobhaPortalScraper {
                         
                         // Metadata
                         metadata: {
-                            scraperVersion: '1.0.9',
+                            scraperVersion: '1.0.5',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
