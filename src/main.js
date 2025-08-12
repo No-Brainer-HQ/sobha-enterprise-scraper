@@ -1154,8 +1154,8 @@ class EnterpriseSobhaPortalScraper {
                     
                     console.log(`DEBUG: Row ${i} has ${cells.length} cells`);
                     
-                    if (cells.length >= 6) {
-                        // FIXED: Extract text from slds-truncate divs
+                    if (cells.length >= 7) {
+                        // FIXED: Extract text from slds-truncate divs (8 columns total including Action)
                         const cellTexts = Array.from(cells).map((cell, cellIndex) => {
                             // First try to get text from slds-truncate div (Lightning structure)
                             const truncateDiv = cell.querySelector('.slds-truncate');
@@ -1185,18 +1185,16 @@ class EnterpriseSobhaPortalScraper {
                             scrapedAt: new Date().toISOString()
                         };
                         
-                        // Filter valid properties
-                        if (property.project !== 'Unknown Project' && 
-                            property.unitNo && 
-                            property.unitNo !== `Unit-${i + 1}` &&
+                        // Filter valid properties - more lenient filtering
+                        if (property.project && property.project !== 'Unknown Project' && 
                             property.project.length > 0) {
                             results.push(property);
                             console.log(`✅ DEBUG: Extracted Lightning property ${i}: ${property.project} - ${property.unitNo}`);
                         } else {
-                            console.log(`❌ DEBUG: Skipped row ${i} - insufficient data`);
+                            console.log(`❌ DEBUG: Skipped row ${i} - insufficient data: project="${property.project}"`);
                         }
                     } else {
-                        console.log(`❌ DEBUG: Row ${i} has insufficient cells (${cells.length})`);
+                        console.log(`❌ DEBUG: Row ${i} has insufficient cells (${cells.length}) - need at least 7`);
                     }
                 }
                 
