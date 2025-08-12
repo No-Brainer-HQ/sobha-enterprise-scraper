@@ -1059,7 +1059,7 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Extract property data from modal table - SIMPLE MODAL DETECTION
+     * FIXED: Extract property data from modal table - WITH LOADING WAIT
      */
     async extractPropertyData(page) {
         try {
@@ -1086,7 +1086,13 @@ class EnterpriseSobhaPortalScraper {
                 throw new Error('No visible modal found for property extraction');
             }
 
-            this.logger.info('Property modal is open, extracting table data');
+            this.logger.info('Property modal is open, waiting for data to load');
+            
+            // CRITICAL FIX: Wait for loading spinner to complete (10-20 seconds + buffer)
+            this.logger.info('Waiting 25 seconds for modal data loading to complete...');
+            await page.waitForTimeout(25000);
+            
+            this.logger.info('Loading wait completed, extracting table data');
 
             // Extract data from the modal table
             const extractedData = await page.evaluate((maxResults) => {
