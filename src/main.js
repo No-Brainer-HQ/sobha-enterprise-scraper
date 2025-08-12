@@ -1102,75 +1102,122 @@ class EnterpriseSobhaPortalScraper {
             
             this.logger.info('Lightning loading wait completed, extracting table data');
 
-            // FIXED: Extract data from Lightning table with slds-truncate divs
+            // ENHANCED DEBUG: Extract data with comprehensive logging
             const extractedData = await page.evaluate((maxResults) => {
+                console.log('🚀 DEBUG: Starting extraction evaluation');
                 const results = [];
                 
-                // Find ANY visible modal
-                let modal = null;
+                // STEP 1: Comprehensive modal detection
+                console.log('🔍 DEBUG: Step 1 - Finding modal');
+                
                 const dialogModals = document.querySelectorAll('[role="dialog"]');
                 const sldsModals = document.querySelectorAll('.slds-modal');
+                const allModals = [...dialogModals, ...sldsModals];
                 
-                for (const m of [...dialogModals, ...sldsModals]) {
-                    if (m.offsetParent !== null) { // Visible modal
+                console.log(`DEBUG: Found ${dialogModals.length} dialog modals, ${sldsModals.length} slds modals`);
+                
+                let modal = null;
+                for (let i = 0; i < allModals.length; i++) {
+                    const m = allModals[i];
+                    const isVisible = m.offsetParent !== null;
+                    console.log(`DEBUG: Modal ${i}: visible=${isVisible}, classes="${m.className}"`);
+                    if (isVisible) {
                         modal = m;
+                        console.log(`✅ DEBUG: Using modal ${i} as active modal`);
                         break;
                     }
                 }
                 
                 if (!modal) {
-                    console.log('❌ DEBUG: No visible modal found');
+                    console.log('❌ DEBUG: No visible modal found after checking all modals');
                     return results;
                 }
                 
-                console.log('✅ DEBUG: Modal found, analyzing Lightning table structure');
+                // STEP 2: Table detection with multiple strategies
+                console.log('🔍 DEBUG: Step 2 - Finding table in modal');
                 
-                // FIXED: Look for the table using correct selector based on HTML structure
-                const table = modal.querySelector('table.customFilterTable, .customFilterTable, table');
+                const tableSelectors = [
+                    'table.customFilterTable',
+                    '.customFilterTable',
+                    'table',
+                    '.slds-table',
+                    '[role="table"]'
+                ];
+                
+                let table = null;
+                for (const selector of tableSelectors) {
+                    table = modal.querySelector(selector);
+                    if (table) {
+                        console.log(`✅ DEBUG: Found table with selector: ${selector}`);
+                        break;
+                    } else {
+                        console.log(`❌ DEBUG: No table found with selector: ${selector}`);
+                    }
+                }
+                
                 if (!table) {
-                    console.log('❌ DEBUG: No table found in modal');
+                    console.log('❌ DEBUG: No table found with any selector');
+                    // DEBUG: Show what's actually in the modal
+                    console.log('DEBUG: Modal content preview:', modal.innerHTML.substring(0, 500));
                     return results;
                 }
                 
-                console.log('✅ DEBUG: Table found');
-                
-                // FIXED: Look for tbody using correct selector
+                // STEP 3: Tbody detection
+                console.log('🔍 DEBUG: Step 3 - Finding tbody');
                 const tbody = table.querySelector('tbody');
                 if (!tbody) {
                     console.log('❌ DEBUG: No tbody found in table');
+                    console.log('DEBUG: Table content preview:', table.innerHTML.substring(0, 500));
+                    return results;
+                }
+                console.log('✅ DEBUG: Tbody found');
+                
+                // STEP 4: Row detection
+                console.log('🔍 DEBUG: Step 4 - Finding rows');
+                const rowSelectors = ['tr.slds-hint-parent', 'tr'];
+                let rows = [];
+                
+                for (const selector of rowSelectors) {
+                    rows = tbody.querySelectorAll(selector);
+                    if (rows.length > 0) {
+                        console.log(`✅ DEBUG: Found ${rows.length} rows with selector: ${selector}`);
+                        break;
+                    } else {
+                        console.log(`❌ DEBUG: No rows found with selector: ${selector}`);
+                    }
+                }
+                
+                if (rows.length === 0) {
+                    console.log('❌ DEBUG: No rows found with any selector');
+                    console.log('DEBUG: Tbody content preview:', tbody.innerHTML.substring(0, 500));
                     return results;
                 }
                 
-                console.log('✅ DEBUG: Tbody found');
-                
-                // FIXED: Look for rows using correct selector from HTML structure
-                const rows = tbody.querySelectorAll('tr.slds-hint-parent, tr');
-                
-                console.log(`✅ DEBUG: Found ${rows.length} rows`);
-                
+                // STEP 5: Process rows
+                console.log('🔍 DEBUG: Step 5 - Processing rows');
                 for (let i = 0; i < Math.min(rows.length, maxResults); i++) {
+                    console.log(`DEBUG: Processing row ${i}`);
                     const row = rows[i];
                     const cells = row.querySelectorAll('td');
                     
                     console.log(`DEBUG: Row ${i} has ${cells.length} cells`);
                     
                     if (cells.length >= 7) {
-                        // FIXED: Extract text from slds-truncate divs (8 columns total including Action)
-                        const cellTexts = Array.from(cells).map((cell, cellIndex) => {
-                            // First try to get text from slds-truncate div (Lightning structure)
+                        // Extract text from each cell
+                        const cellTexts = [];
+                        for (let cellIndex = 0; cellIndex < cells.length; cellIndex++) {
+                            const cell = cells[cellIndex];
                             const truncateDiv = cell.querySelector('.slds-truncate');
                             const directText = cell.textContent?.trim() || '';
                             const truncateText = truncateDiv ? truncateDiv.textContent?.trim() || '' : '';
+                            const finalText = truncateText || directText;
                             
-                            console.log(`DEBUG: Cell ${cellIndex} - Direct: "${directText}", Truncate: "${truncateText}"`);
-                            
-                            return truncateText || directText;
-                        });
-                        
-                        console.log(`DEBUG: Row ${i} extracted texts:`, cellTexts);
+                            cellTexts.push(finalText);
+                            console.log(`DEBUG: Cell ${cellIndex}: "${finalText}" (truncate: "${truncateText}", direct: "${directText}")`);
+                        }
                         
                         const property = {
-                            unitId: `sobha_lightning_${Date.now()}_${i}`,
+                            unitId: `sobha_lightning_debug_${Date.now()}_${i}`,
                             project: cellTexts[0] || 'Unknown Project',
                             subProject: cellTexts[1] || '',
                             unitType: cellTexts[2] || '',
@@ -1180,25 +1227,35 @@ class EnterpriseSobhaPortalScraper {
                             startingPrice: cellTexts[6] || '',
                             availability: 'available',
                             sourceUrl: window.location.href,
-                            extractionMethod: 'Lightning-Table-Fixed',
+                            extractionMethod: 'Lightning-Enhanced-Debug',
                             rawCellData: cellTexts,
-                            scrapedAt: new Date().toISOString()
+                            scrapedAt: new Date().toISOString(),
+                            debugInfo: {
+                                cellCount: cells.length,
+                                rowIndex: i,
+                                hasValidProject: !!(cellTexts[0] && cellTexts[0] !== 'Unknown Project' && cellTexts[0].length > 0)
+                            }
                         };
                         
-                        // Filter valid properties - more lenient filtering
-                        if (property.project && property.project !== 'Unknown Project' && 
-                            property.project.length > 0) {
+                        // Very lenient filtering - accept any row with some data
+                        if (cellTexts.some(text => text && text.length > 0)) {
                             results.push(property);
-                            console.log(`✅ DEBUG: Extracted Lightning property ${i}: ${property.project} - ${property.unitNo}`);
+                            console.log(`✅ DEBUG: Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
                         } else {
-                            console.log(`❌ DEBUG: Skipped row ${i} - insufficient data: project="${property.project}"`);
+                            console.log(`❌ DEBUG: Skipped row ${i} - no meaningful data found`);
                         }
                     } else {
-                        console.log(`❌ DEBUG: Row ${i} has insufficient cells (${cells.length}) - need at least 7`);
+                        console.log(`❌ DEBUG: Row ${i} has only ${cells.length} cells (need 7+)`);
+                        if (cells.length > 0) {
+                            // Show what cells we do have
+                            for (let j = 0; j < cells.length; j++) {
+                                console.log(`DEBUG: Available cell ${j}: "${cells[j].textContent?.trim()}"`);
+                            }
+                        }
                     }
                 }
                 
-                console.log(`🎯 DEBUG: Total Lightning properties extracted: ${results.length}`);
+                console.log(`🎯 DEBUG: Extraction complete - found ${results.length} properties`);
                 return results;
                 
             }, this.input.maxResults);
