@@ -1065,10 +1065,7 @@ class EnterpriseSobhaPortalScraper {
         try {
             this.logger.info('Starting Lightning table-based property data extraction');
 
-            // Wait for modal content to be stable
-            await page.waitForTimeout(2000);
-
-            // FIXED: Wait for actual TABLE to appear inside modal with correct selector
+            // FIXED: Wait for table to appear, then extract immediately (no 25-second wait)
             this.logger.info('Waiting for Lightning property data table to load in modal...');
             
             try {
@@ -1096,11 +1093,84 @@ class EnterpriseSobhaPortalScraper {
                 }
             }
 
-            // Wait for loading spinner to complete
+            // ORIGINAL PLAN: Wait for table to appear, then wait 25 seconds for loading
+            this.logger.info('Waiting for Lightning property data table to load in modal...');
+            
+            try {
+                // FIXED: Use correct selector based on HTML structure shown in images
+                await page.waitForSelector('.slds-modal table tbody', { 
+                    timeout: 30000,
+                    state: 'visible'
+                });
+                
+                this.logger.info('✅ Lightning property data table found in modal');
+                
+            } catch (tableWaitError) {
+                this.logger.warn('Lightning table selector failed, trying alternative approach');
+                
+                // Alternative: wait for any table-like structure
+                try {
+                    await page.waitForSelector('.slds-modal .customFilterTable', { 
+                        timeout: 15000,
+                        state: 'visible'
+                    });
+                    this.logger.info('✅ Alternative Lightning table structure found');
+                } catch (altTableError) {
+                    this.logger.error('No Lightning table found in modal after waiting', { error: altTableError.message });
+                    throw new Error('Lightning property data table did not load in modal within timeout');
+                }
+            }
+
+            // ORIGINAL PLAN: Wait 25 seconds for loading spinner to complete
             this.logger.info('Waiting 25 seconds for Lightning modal data loading to complete...');
             await page.waitForTimeout(25000);
             
-            this.logger.info('Lightning loading wait completed, extracting table data');
+            this.logger.info('Lightning loading wait completed, checking if modal is still open...');
+
+            // CHECK: Is modal still open after 25-second wait?
+            const isModalStillOpen = await page.evaluate(() => {
+                const dialogModals = document.querySelectorAll('[role="dialog"]');
+                const sldsModals = document.querySelectorAll('.slds-modal');
+                const allModals = [...dialogModals, ...sldsModals];
+                
+                for (const modal of allModals) {
+                    if (modal.offsetParent !== null) { // Visible modal
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            if (isModalStillOpen) {
+                this.logger.info('✅ Modal is still open after 25-second wait - proceeding with extraction');
+            } else {
+                this.logger.warn('❌ Modal auto-closed during 25-second wait - reopening modal and extracting immediately');
+                
+                // FALLBACK: Reopen the modal
+                try {
+                    // Click the Filter Properties button again
+                    await page.click('a[data-element="general-enquiry"]:has-text("Filter Properties")');
+                    
+                    // Wait for modal to reopen
+                    await page.waitForSelector('[role="dialog"], .slds-modal', { 
+                        timeout: 15000,
+                        state: 'visible'
+                    });
+                    
+                    // Short wait for modal content to stabilize
+                    await page.waitForTimeout(3000);
+                    
+                    this.logger.info('✅ Modal reopened successfully - extracting data immediately');
+                    
+                } catch (reopenError) {
+                    this.logger.error('Failed to reopen modal', { error: reopenError.message });
+                    throw new Error('Could not reopen modal after auto-close');
+                }
+            }
+
+            this.logger.info('Starting data extraction from modal...');
+
+            this.logger.info('Starting data extraction from modal...');
 
             // ENHANCED DEBUG: Extract data with comprehensive logging
             const extractionResult = await page.evaluate((maxResults) => {
