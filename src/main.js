@@ -1059,7 +1059,7 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * FIXED: Extract property data from modal table - WITH LOADING WAIT
+     * FIXED: Extract property data from modal table - WAIT FOR DATA TABLE TO LOAD
      */
     async extractPropertyData(page) {
         try {
@@ -1068,26 +1068,34 @@ class EnterpriseSobhaPortalScraper {
             // Wait for modal content to be stable
             await page.waitForTimeout(2000);
 
-            // FIXED: Simple modal detection - any visible modal with table
-            const modalExists = await page.evaluate(() => {
-                // Find ANY visible modal
-                const dialogModals = document.querySelectorAll('[role="dialog"]');
-                const sldsModals = document.querySelectorAll('.slds-modal');
-                
-                for (const modal of [...dialogModals, ...sldsModals]) {
-                    if (modal.offsetParent !== null) { // Visible modal
-                        return true;
-                    }
-                }
-                return false;
-            });
+            // FIXED: Wait for actual DATA TABLE to appear, not just modal container
+            this.logger.info('Waiting for property data table to load in modal...');
             
-            if (!modalExists) {
-                throw new Error('No visible modal found for property extraction');
+            try {
+                // Wait for table with actual data to appear inside modal
+                await page.waitForSelector('[role="dialog"] table, .slds-modal table', { 
+                    timeout: 30000,
+                    state: 'visible'
+                });
+                
+                this.logger.info('✅ Property data table found in modal');
+                
+            } catch (tableWaitError) {
+                this.logger.warn('Table selector failed, trying alternative approach');
+                
+                // Alternative: wait for any table-like structure
+                try {
+                    await page.waitForSelector('[role="dialog"] [role="table"], .slds-modal [role="grid"]', { 
+                        timeout: 15000,
+                        state: 'visible'
+                    });
+                    this.logger.info('✅ Alternative table structure found');
+                } catch (altTableError) {
+                    this.logger.error('No table found in modal after waiting', { error: altTableError.message });
+                    throw new Error('Property data table did not load in modal within timeout');
+                }
             }
 
-            this.logger.info('Property modal is open, waiting for data to load');
-            
             // CRITICAL FIX: Wait for loading spinner to complete (10-20 seconds + buffer)
             this.logger.info('Waiting 25 seconds for modal data loading to complete...');
             await page.waitForTimeout(25000);
