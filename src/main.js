@@ -5,7 +5,7 @@
  * Built with comprehensive error handling, security, monitoring, and scalability
  * 
  * Author: BARACA Engineering Team
- * Version: 1.0.8 - FINAL - RESILIENT PAGE LOAD & BATCH EXTRACTION
+ * Version: 1.0.9 - STABLE - Resilient Load + Batched Extraction
  * License: Proprietary - BARACA Life Capital Real Estate
  */
 
@@ -747,73 +747,41 @@ class EnterpriseSobhaPortalScraper {
     }
 
     /**
-     * NEW: Wait for Lightning components to fully render
+     * Reverted to the simpler, working version of the component wait logic.
      */
     async waitForLightningComponentsToRender(page) {
         try {
-            this.logger.info('Waiting for Lightning components to fully render');
+            this.logger.info('Waiting for Lightning components to fully render (stable logic)');
 
-            // Step 1: Wait for the main Lightning component to appear
+            // Step 1: Wait for main component using original, reliable logic
             this.logger.debug('Waiting for main Lightning component');
             await page.waitForFunction(() => {
-                // Wait for the specific Sobha projects component OR a clear sign of content
                 const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
-                const filterComponent = document.querySelector('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter');
-
-                if (sobhaComponent || filterComponent) {
-                    console.log('Sobha Lightning component found');
-                    return true;
-                }
+                if (sobhaComponent) return true;
                 
-                // Also check for general Lightning content as a fallback
                 const lightningContent = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
-                console.log(`Found ${lightningContent.length} Lightning elements`);
-                return lightningContent.length > 150; // Increased threshold for a more definitive sign of a rendered page
+                return lightningContent.length > 50; // Original threshold
             }, {}, { timeout: 30000 });
 
-            // Step 2: Wait for UI elements to be rendered and interactive inside the component
+            // Step 2: Wait for UI content using original, reliable logic
             this.logger.debug('Waiting for UI content to render inside Lightning components');
             await page.waitForFunction(() => {
-                // We need to find clickable elements that signal the page is ready.
-                // The "Filter Properties" is an <a> tag, so we must include it.
-                const clickables = document.querySelectorAll('button, a[role="button"], a.btn, lightning-button');
+                const buttons = document.querySelectorAll('button');
+                const inputs = document.querySelectorAll('input');
+                const clickables = document.querySelectorAll('[onclick], [role="button"]');
+                const totalInteractive = buttons.length + inputs.length + clickables.length;
                 
-                const totalInteractive = clickables.length;
-                console.log(`Found ${totalInteractive} key interactive elements`);
-                
-                // Check for the text that is our main goal
                 const bodyText = document.body.textContent || '';
-                const hasFilterContent = bodyText.includes('Filter Properties') || bodyText.includes('Apply Filter');
+                const hasFilterContent = bodyText.includes('Filter') || bodyText.includes('Properties') || bodyText.includes('Search');
                 
-                console.log(`Has filter content: ${hasFilterContent}`);
-                console.log(`Total key interactive elements: ${totalInteractive}`);
-                
-                // A reliable page has at least one button/link and the filter text
-                return totalInteractive >= 1 && hasFilterContent;
+                return totalInteractive >= 5 && hasFilterContent;
             }, {}, { timeout: 45000 });
 
-            // Step 3: Additional wait for any final rendering
+            // Step 3: Additional stabilization wait
             this.logger.debug('Allowing extra time for final component rendering');
             await page.waitForTimeout(5000);
-
-            // Step 4: Final verification
-            const componentStatus = await page.evaluate(() => {
-                const buttons = document.querySelectorAll('button, a.btn, lightning-button');
-                const bodyText = document.body.textContent || '';
-                
-                return {
-                    buttonCount: buttons.length,
-                    hasFilterPropertiesText: bodyText.includes('Filter Properties'),
-                    contentLength: bodyText.length
-                };
-            });
-
-            this.logger.info('Lightning component rendering check completed', componentStatus);
-
-            if (!componentStatus.hasFilterPropertiesText) {
-                throw new Error('Page loaded, but the critical "Filter Properties" text was not found in the DOM.');
-            }
-
+            
+            this.logger.info('Component rendering wait completed successfully.');
             return true;
 
         } catch (error) {
@@ -833,107 +801,20 @@ class EnterpriseSobhaPortalScraper {
             // Wait for Lightning components to be fully interactive
             await page.waitForTimeout(3000);
 
-            // DEBUGGING: Analyze what's actually on the page AFTER modal dismissal and Lightning rendering
-            this.logger.info('Analyzing page content after modal dismissal and Lightning rendering');
-            const pageAnalysis = await page.evaluate(() => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                const links = Array.from(document.querySelectorAll('a'));
-                const inputs = Array.from(document.querySelectorAll('input'));
-                const allClickables = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [onclick], [role="button"], a, a.btn'));
-                
-                // Look specifically for Lightning component content
-                const sobhaComponent = document.querySelector('c-brokerportalsohbaprojects, [class*="brokerportalsohbaprojects"]');
-                const sobhaFilterComponent = document.querySelector('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter, [c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]');
-                const lightningElements = document.querySelectorAll('[class*="slds-"], [data-aura-rendered-by]');
-                
-                return {
-                    totalButtons: buttons.length,
-                    totalLinks: links.length,
-                    totalInputs: inputs.length,
-                    totalClickables: allClickables.length,
-                    hasSobhaComponent: !!sobhaComponent,
-                    hasSobhaFilterComponent: !!sobhaFilterComponent,
-                    lightningElementCount: lightningElements.length,
-                    buttonTexts: buttons.map(btn => btn.textContent?.trim()).filter(text => text && text.length > 0),
-                    linkTexts: links.map(link => link.textContent?.trim()).filter(text => text && text.length > 0),
-                    inputValues: inputs.map(inp => inp.value?.trim() || inp.placeholder?.trim()).filter(text => text && text.length > 0),
-                    clickableTexts: allClickables.map(el => el.textContent?.trim() || el.value?.trim() || el.getAttribute('aria-label')).filter(text => text && text.length > 0),
-                    pageText: document.body.textContent?.includes('Filter') ? 'Contains Filter text' : 'No Filter text found',
-                    pageTitle: document.title,
-                    currentUrl: window.location.href,
-                    
-                    // Check for remaining modals (including Lightning component modal)
-                    visibleModals: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal, [c-brokerportalhomepage_brokerportalhomepage]'))
-                        .filter(modal => modal.offsetParent !== null).length,
-                    modalInfo: Array.from(document.querySelectorAll('[role="dialog"], .slds-modal, [c-brokerportalhomepage_brokerportalhomepage]'))
-                        .filter(modal => modal.offsetParent !== null)
-                        .map(modal => ({
-                            className: modal.className,
-                            componentName: modal.getAttribute('c-brokerportalhomepage_brokerportalhomepage') ? 'Lightning-HomePage' : 'Standard',
-                            textContent: (modal.textContent || '').substring(0, 100)
-                        })),
-                    
-                    // Sample of actual elements for debugging
-                    buttonSample: buttons.slice(0, 3).map(btn => ({
-                        text: btn.textContent?.trim(),
-                        value: btn.value,
-                        className: btn.className,
-                        id: btn.id,
-                        type: btn.type,
-                        visible: btn.offsetParent !== null
-                    })),
-                    linkSample: links.slice(0, 5).map(link => ({
-                        text: link.textContent?.trim(),
-                        className: link.className,
-                        id: link.id,
-                        href: link.href,
-                        dataElement: link.getAttribute('data-element'),
-                        lightningComponent: link.getAttribute('c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter') ? 'Filter-Component' : null,
-                        visible: link.offsetParent !== null
-                    }))
-                };
-            });
-
-            this.logger.info('Lightning-aware page analysis completed', pageAnalysis);
-
             // Find and click the "Filter Properties" button
             this.logger.info('Looking for Filter Properties button with Lightning awareness');
             
             try {
-                // Enhanced selector targeting Lightning-rendered content (FIXED: target <a> tags)
+                // Enhanced selector targeting Lightning-rendered content
                 const lightningFilterSelectors = [
-                    // Target the exact Lightning component from HTML inspection
-                    'a[c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]:has-text("Filter Properties")',
-                    'a[data-element="general-enquiry"]:has-text("Filter Properties")',
-                    'a.btn.mt-4:has-text("Filter Properties")',
-                    
-                    // Standard <a> tag text selectors
+                    'a[data-element="general-enquiry"]:has-text("Filter Properties")', // Most reliable from previous logs
                     'a:has-text("Filter Properties")',
-                    'a:has-text("Filter")',
-                    
-                    // Lightning-specific <a> tag selectors  
+                    'a.btn:has-text("Filter Properties")',
+                    'a[c-brokerportalsohbaprojectfilter_brokerportalsohbaprojectfilter]:has-text("Filter Properties")',
                     'lightning-button:has-text("Filter Properties")',
-                    'lightning-button:has-text("Filter")',
-                    
-                    // Aura component <a> tags
-                    '[data-aura-class*="button"]:has-text("Filter")',
-                    
-                    // SLDS (Salesforce Lightning Design System) <a> tags
-                    '.slds-button:has-text("Filter")',
-                    '.btn:has-text("Filter Properties")',
                     '.btn:has-text("Filter")',
-                    
-                    // Fallback to button tags (original selectors)
                     'button:has-text("Filter Properties")',
                     'button:has-text("Filter")',
-                    'button:has-text("Apply")',
-                    'button:has-text("Search")',
-                    
-                    // Try different case variations for <a> tags
-                    'a:has-text("FILTER PROPERTIES")',
-                    'a:has-text("filter properties")',
-                    'a:has-text("Apply Filter")',
-                    'a:has-text("Search Properties")'
                 ];
 
                 let buttonFound = false;
@@ -942,7 +823,6 @@ class EnterpriseSobhaPortalScraper {
                         this.logger.debug(`Trying Lightning selector: ${selector}`);
                         const buttonLocator = page.locator(selector);
                         
-                        // Wait for the element with a reasonable timeout
                         await buttonLocator.waitFor({ 
                             timeout: 5000,
                             state: 'visible'
@@ -950,8 +830,7 @@ class EnterpriseSobhaPortalScraper {
 
                         this.logger.info(`Found button with Lightning selector: ${selector}`);
                         
-                        // Click the button using the locator (more robust)
-                        await buttonLocator.click();
+                        await buttonLocator.click({timeout: 10000});
                         buttonFound = true;
                         break;
                         
@@ -961,89 +840,21 @@ class EnterpriseSobhaPortalScraper {
                 }
 
                 if (buttonFound) {
-                    // Wait for modal to appear
                     this.logger.info('Button clicked, waiting for property modal to load');
-                    
-                    // Wait for modal using standard CSS selectors
                     await page.waitForSelector('[role="dialog"], .slds-modal', { 
                         timeout: CONFIG.MODAL_WAIT,
                         state: 'visible'
                     });
-
-                    // Additional wait for modal content to load
                     await page.waitForTimeout(3000);
-
                     this.logger.info('✅ Property modal opened successfully');
                     return true;
                 } else {
-                    throw new Error('No Lightning filter button selectors worked');
+                    throw new Error('No Lightning filter button selectors worked after successful page render.');
                 }
 
             } catch (buttonError) {
-                this.logger.error('Lightning-aware button detection failed', { 
-                    error: buttonError.message 
-                });
-                
-                // FINAL ATTEMPT: Use JavaScript to find and click any filter-related button
-                this.logger.info('Trying comprehensive JavaScript button detection');
-                try {
-                    const filterButtonClicked = await page.evaluate(() => {
-                        console.log('Starting comprehensive button search...');
-                        
-                        // Get all potentially clickable elements (including <a> tags)
-                        const allElements = Array.from(document.querySelectorAll(
-                            'button, input[type="button"], input[type="submit"], [role="button"], [onclick], lightning-button, a, a.btn'
-                        ));
-                        
-                        console.log(`Found ${allElements.length} potentially clickable elements`);
-                        
-                        for (const element of allElements) {
-                            const text = (element.textContent || element.value || '').toLowerCase();
-                            const ariaLabel = (element.getAttribute('aria-label') || '').toLowerCase();
-                            const className = (element.className || '').toLowerCase();
-                            const id = (element.id || '').toLowerCase();
-                            
-                            // Look for filter-related keywords
-                            const searchTerms = ['filter', 'search', 'apply', 'properties', 'submit'];
-                            const hasFilterKeyword = searchTerms.some(term => 
-                                text.includes(term) || ariaLabel.includes(term) || className.includes(term) || id.includes(term)
-                            );
-                            
-                            if (hasFilterKeyword && element.offsetParent !== null) { // Visible element
-                                console.log(`Found potential filter button: "${text || ariaLabel || className}" - attempting click`);
-                                
-                                try {
-                                    element.click();
-                                    console.log('Button clicked successfully');
-                                    return true;
-                                } catch (clickError) {
-                                    console.log(`Click failed: ${clickError}`);
-                                }
-                            }
-                        }
-                        
-                        console.log('No suitable filter button or link found');
-                        return false;
-                    });
-                    
-                    if (filterButtonClicked) {
-                        this.logger.info('Filter button clicked via JavaScript');
-                        await page.waitForTimeout(5000);
-                        
-                        // Check if modal appeared
-                        const modalCount = await page.locator('[role="dialog"], .slds-modal').count();
-                        if (modalCount > 0) {
-                            this.logger.info('✅ Modal opened with JavaScript button detection');
-                            return true;
-                        } else {
-                            this.logger.warn('Button was clicked but no modal appeared');
-                        }
-                    }
-                } catch (jsError) {
-                    this.logger.debug('JavaScript button detection failed', { error: jsError.message });
-                }
-                
-                throw new Error('Could not find or click Filter Properties button/link after comprehensive Lightning-aware search');
+                this.logger.error('Lightning-aware button detection failed', { error: buttonError.message });
+                throw new Error(`Could not find or click Filter Properties button: ${buttonError.message}`);
             }
 
         } catch (error) {
@@ -1271,7 +1082,7 @@ class EnterpriseSobhaPortalScraper {
                         
                         // Metadata
                         metadata: {
-                            scraperVersion: '1.0.8',
+                            scraperVersion: '1.0.9',
                             portalUrl: CONFIG.LOGIN_URL,
                             userAgent: await page.evaluate(() => navigator.userAgent),
                             viewport: await page.evaluate(() => ({
