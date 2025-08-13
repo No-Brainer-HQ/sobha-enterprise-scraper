@@ -20,7 +20,7 @@ import { performance } from 'perf_hooks';
 const CONFIG = {
     // Performance settings
     MAX_CONCURRENT_REQUESTS: 2,
-    REQUEST_TIMEOUT: 600000, // 10 minutes
+    REQUEST_TIMEOUT: 1800000, // 30 minutes for large datasets
     NAVIGATION_TIMEOUT: 60000, // 1 minute
     CONTENT_WAIT: 10000, // 10 seconds for content to render
     MODAL_WAIT: 15000, // 15 seconds for modal to load
@@ -1097,45 +1097,28 @@ class EnterpriseSobhaPortalScraper {
             // Short wait for content stability
             await page.waitForTimeout(3000);
 
-            // Use Playwright locators to extract data (this can see Shadow DOM)
+            // Use Playwright evaluateAll for batch extraction (much faster)
             const extractedData = [];
             
             try {
-                // Find all table rows using Playwright locators
-                const rows = await page.locator('.slds-modal table tbody tr').all();
-                this.logger.info(`Found ${rows.length} table rows for extraction`);
+                // Use evaluateAll for batch extraction (single operation instead of thousands)
+                const rowsData = await page.locator('.slds-modal table tbody tr').evaluateAll(rows => {
+                    return rows.map(row => {
+                        const cells = row.querySelectorAll('td');
+                        return Array.from(cells).map(cell => {
+                            const truncateDiv = cell.querySelector('.slds-truncate');
+                            return truncateDiv ? truncateDiv.textContent.trim() : cell.textContent.trim();
+                        });
+                    });
+                });
 
-                for (let i = 0; i < Math.min(rows.length, this.input.maxResults); i++) {
-                    const row = rows[i];
-                    
-                    // Get all cells in this row
-                    const cells = await row.locator('td').all();
-                    this.logger.debug(`Row ${i} has ${cells.length} cells`);
-                    
-                    if (cells.length >= 7) { // Need at least 7 columns
-                        const cellTexts = [];
-                        
-                        // Extract text from each cell using Playwright
-                        for (const cell of cells) {
-                            try {
-                                // Try to get text from slds-truncate div first
-                                const truncateDiv = cell.locator('.slds-truncate');
-                                const truncateCount = await truncateDiv.count();
-                                
-                                let cellText = '';
-                                if (truncateCount > 0) {
-                                    cellText = await truncateDiv.first().textContent() || '';
-                                } else {
-                                    cellText = await cell.textContent() || '';
-                                }
-                                
-                                cellTexts.push(cellText.trim());
-                            } catch (cellError) {
-                                this.logger.debug(`Error extracting cell text: ${cellError.message}`);
-                                cellTexts.push('');
-                            }
-                        }
+                this.logger.info(`Found ${rowsData.length} table rows for extraction`);
 
+                for (let i = 0; i < Math.min(rowsData.length, this.input.maxResults); i++) {
+                    const cellTexts = rowsData[i];
+                    this.logger.debug(`Row ${i} has ${cellTexts.length} cells`);
+                    
+                    if (cellTexts.length >= 7) { // Need at least 7 columns
                         // Create property object (8 columns: Project, Sub Project, Unit Type, Floor, Unit No, Total Unit Area, Starting Price, Action)
                         const property = {
                             unitId: `sobha_lightning_${Date.now()}_${i}`,
@@ -1148,7 +1131,7 @@ class EnterpriseSobhaPortalScraper {
                             startingPrice: cellTexts[6] || '',
                             availability: 'available',
                             sourceUrl: page.url(),
-                            extractionMethod: 'Playwright-Locators',
+                            extractionMethod: 'Playwright-BatchExtraction',
                             scrapedAt: new Date().toISOString(),
                             rawCellData: cellTexts
                         };
@@ -1156,17 +1139,19 @@ class EnterpriseSobhaPortalScraper {
                         // Accept any row with valid project name
                         if (property.project && property.project !== 'Unknown Project' && property.project.length > 0) {
                             extractedData.push(property);
-                            this.logger.debug(`✅ Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
+                            if (i < 10) { // Only log first 10 for performance
+                                this.logger.debug(`✅ Added property ${i}: project="${property.project}", unit="${property.unitNo}"`);
+                            }
                         } else {
                             this.logger.debug(`❌ Skipped row ${i} - no valid project name`);
                         }
                     } else {
-                        this.logger.debug(`❌ Row ${i} has only ${cells.length} cells (need 7+)`);
+                        this.logger.debug(`❌ Row ${i} has only ${cellTexts.length} cells (need 7+)`);
                     }
                 }
 
             } catch (extractError) {
-                this.logger.error('Error during Playwright locator extraction', { error: extractError.message });
+                this.logger.error('Error during Playwright batch extraction', { error: extractError.message });
             }
 
             this.logger.info('Lightning table extraction completed', { propertiesFound: extractedData.length });
@@ -1176,20 +1161,20 @@ class EnterpriseSobhaPortalScraper {
                 this.logger.warn('No Lightning property data found - creating debug entry');
                 
                 extractedData.push({
-                    unitId: `debug_playwright_locators_${Date.now()}`,
-                    project: 'Playwright Locators Debug Entry',
+                    unitId: `debug_playwright_batch_${Date.now()}`,
+                    project: 'Playwright Batch Debug Entry',
                     subProject: 'No Properties Found',
                     unitType: 'Debug',
                     floor: '0',
-                    unitNo: 'DEBUG-PLAYWRIGHT-001',
+                    unitNo: 'DEBUG-BATCH-001',
                     totalUnitArea: '0',
                     startingPrice: '0',
                     availability: 'debug',
                     sourceUrl: page.url(),
                     debugInfo: {
-                        message: 'No Lightning property data found using Playwright locators'
+                        message: 'No Lightning property data found using Playwright batch extraction'
                     },
-                    extractionMethod: 'Playwright-Debug',
+                    extractionMethod: 'Playwright-Batch-Debug',
                     scrapedAt: new Date().toISOString()
                 });
             }
@@ -1214,18 +1199,18 @@ class EnterpriseSobhaPortalScraper {
             
             // Return error entry
             return [{
-                unitId: `error_playwright_locators_${Date.now()}`,
-                project: 'Playwright Locators Error Entry',
+                unitId: `error_playwright_batch_${Date.now()}`,
+                project: 'Playwright Batch Error Entry',
                 subProject: 'Extraction failed',
                 unitType: 'Error',
                 floor: '0',
-                unitNo: 'ERROR-PLAYWRIGHT-001',
+                unitNo: 'ERROR-BATCH-001',
                 totalUnitArea: '0',
                 startingPrice: '0',
                 availability: 'error',
                 sourceUrl: page.url(),
                 errorInfo: error.message,
-                extractionMethod: 'Playwright-Error-Fallback',
+                extractionMethod: 'Playwright-Batch-Error-Fallback',
                 scrapedAt: new Date().toISOString()
             }];
         }
