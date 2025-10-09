@@ -2,7 +2,7 @@
 
 **Version: 1.0.0 | Status: Production Ready | For: BARACA Life Capital Real Estate**
 
-This repository contains an enterprise-grade web scraper designed to extract property data from the Sobha Partner Portal. It is built for multi-billion dollar company standards with a focus on reliability, security, monitoring, and scalability.
+This repository contains an enterprise-grade web scraper designed to extract property data from the Sobha Partner Portal. It is built for  with a focus on reliability, security, monitoring, and scalability.
 
 ## Table of Contents
 
