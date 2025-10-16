@@ -890,20 +890,26 @@ async openPropertyModal(page) {
     }
 }
 
-   /**
- * FIXED: Extract property data from the Lightning table
+/**
+ * FIXED: Extract property data with better row waiting
  */
 async extractPropertyData(page) {
     try {
         this.logger.info('Extracting property data from Lightning table');
 
-        // Verify table is visible
-        await page.waitForSelector('.customFilterTable tbody tr', { 
-            timeout: 10000,
-            state: 'visible'
-        });
+        // Wait longer for rows to appear - table loads but rows take time
+        this.logger.info('Waiting for table rows to load...');
+        
+        await page.waitForFunction(() => {
+            const rows = document.querySelectorAll('.customFilterTable tbody tr');
+            console.log(`Found ${rows.length} rows in table`);
+            return rows.length > 0;
+        }, {}, { timeout: 30000 }); // 30 second timeout
 
-        // Use evaluateAll for batch extraction
+        // Additional wait for content to stabilize
+        await page.waitForTimeout(2000);
+
+        // Extract using evaluateAll
         const rowsData = await page.locator('.customFilterTable tbody tr').evaluateAll(rows => {
             return rows.map(row => {
                 const cells = row.querySelectorAll('td');
@@ -925,7 +931,7 @@ async extractPropertyData(page) {
                 const property = {
                     unitId: `sobha_${Date.now()}_${i}`,
                     project: cellTexts[0] || 'Unknown',
-                    projectDuplicate: cellTexts[1] || '', // Sometimes duplicated
+                    projectDuplicate: cellTexts[1] || '',
                     unitType: cellTexts[2] || '',
                     floor: cellTexts[3] || '',
                     unitNo: cellTexts[4] || `Unit-${i + 1}`,
