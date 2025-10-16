@@ -864,16 +864,16 @@ class EnterpriseSobhaPortalScraper {
             throw new Error('Filter Properties button not found');
         }
 
-        // FIXED: Wait for SPECIFIC modal elements (not generic dialog that matches error)
+        // Wait for modal to open (checking specific modal element, not error dialog)
         this.logger.info('Waiting for property modal to open');
         await page.waitForSelector('.customModelContent, .tableScroller', { 
             timeout: 10000,
-            state: 'attached'  // Just needs to exist in DOM
+            state: 'attached'
         });
 
         this.logger.info('Modal opened, checking for errors');
 
-        // Check for Aura error dialog
+        // Check for Aura error
         const hasError = await page.evaluate(() => {
             const errorDialog = document.querySelector('#auraError');
             if (errorDialog && errorDialog.offsetParent !== null) {
@@ -887,42 +887,19 @@ class EnterpriseSobhaPortalScraper {
             throw new Error(`Salesforce error: ${hasError}`);
         }
 
-        // Wait for loading spinner to appear
-        this.logger.info('Waiting for loading spinner to appear');
-        await page.waitForSelector('.slds-spinner', { 
-            timeout: 5000,
-            state: 'visible'
-        }).catch(() => {
-            this.logger.debug('Spinner did not appear or loaded instantly');
-        });
+        // SIMPLE: Just wait for the data to load (spinner disappears after 15-20 seconds)
+        this.logger.info('Waiting 25 seconds for data to load...');
+        await page.waitForTimeout(25000);  // Fixed wait - simple and reliable
 
-        // CRITICAL: Wait for spinner to DISAPPEAR (15-20 seconds)
-        this.logger.info('Waiting for loading spinner to disappear (may take 15-20 seconds)');
-        await page.waitForFunction(() => {
-            const spinner = document.querySelector('.slds-spinner');
-            const isHidden = !spinner || spinner.offsetParent === null;
-            if (!isHidden) {
-                console.log('Spinner still visible...');
-            }
-            return isHidden;
-        }, {}, { timeout: 30000 });
-
-        this.logger.info('Spinner disappeared, waiting for table rows');
-
-        // Wait for table rows to populate
-        await page.waitForFunction(() => {
-            const rows = document.querySelectorAll('.customFilterTable tbody tr');
-            console.log(`Found ${rows.length} table rows`);
-            return rows.length > 0;
-        }, {}, { timeout: 10000 });
-
-        // Additional stability wait
-        await page.waitForTimeout(2000);
-
-        // Verify data loaded
+        // Verify table rows exist
+        this.logger.info('Verifying table data loaded');
         const rowCount = await page.evaluate(() => {
             return document.querySelectorAll('.customFilterTable tbody tr').length;
         });
+
+        if (rowCount === 0) {
+            throw new Error('No table rows found after waiting for data to load');
+        }
 
         this.logger.info(`✅ Property modal opened with ${rowCount} rows loaded`);
         return true;
