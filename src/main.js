@@ -864,7 +864,7 @@ class EnterpriseSobhaPortalScraper {
             throw new Error('Filter Properties button not found');
         }
 
-        // Wait for modal to open (checking specific modal element, not error dialog)
+        // Wait for SPECIFIC modal elements
         this.logger.info('Waiting for property modal to open');
         await page.waitForSelector('.customModelContent, .tableScroller', { 
             timeout: 10000,
@@ -887,21 +887,73 @@ class EnterpriseSobhaPortalScraper {
             throw new Error(`Salesforce error: ${hasError}`);
         }
 
-        // SIMPLE: Just wait for the data to load (spinner disappears after 15-20 seconds)
-        this.logger.info('Waiting 25 seconds for data to load...');
-        await page.waitForTimeout(25000);  // Fixed wait - simple and reliable
+        // DEBUGGING: Check what's on the page immediately
+        const debugBefore = await page.evaluate(() => ({
+            hasTable: !!document.querySelector('.customFilterTable'),
+            hasTableScroller: !!document.querySelector('.tableScroller'),
+            hasCustomModalContent: !!document.querySelector('.customModelContent'),
+            tableSelector: '.customFilterTable tbody tr',
+            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
+            spinnerCount: document.querySelectorAll('.slds-spinner').length,
+            spinnerVisible: (() => {
+                const spinner = document.querySelector('.slds-spinner');
+                return spinner ? spinner.offsetParent !== null : false;
+            })(),
+            modalText: document.querySelector('.customModelContent, .tableScroller')?.textContent?.substring(0, 200) || 'No modal text'
+        }));
 
-        // Verify table rows exist
-        this.logger.info('Verifying table data loaded');
-        const rowCount = await page.evaluate(() => {
-            return document.querySelectorAll('.customFilterTable tbody tr').length;
-        });
+        this.logger.info('Page state BEFORE waiting:', debugBefore);
 
-        if (rowCount === 0) {
-            throw new Error('No table rows found after waiting for data to load');
+        // Wait for data to load with periodic checks
+        this.logger.info('Waiting for data to load with status updates...');
+        
+        for (let i = 0; i < 6; i++) {  // Check every 5 seconds for 30 seconds total
+            await page.waitForTimeout(5000);
+            
+            const status = await page.evaluate(() => ({
+                rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
+                spinnerVisible: (() => {
+                    const spinner = document.querySelector('.slds-spinner');
+                    return spinner ? spinner.offsetParent !== null : false;
+                })()
+            }));
+            
+            this.logger.info(`Check ${i + 1}/6: Rows=${status.rowCount}, Spinner=${status.spinnerVisible}`);
+            
+            // If we have rows and no spinner, we're done!
+            if (status.rowCount > 0 && !status.spinnerVisible) {
+                this.logger.info(`✅ Data loaded after ${(i + 1) * 5} seconds`);
+                break;
+            }
         }
 
-        this.logger.info(`✅ Property modal opened with ${rowCount} rows loaded`);
+        // Final verification
+        const finalStatus = await page.evaluate(() => ({
+            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
+            hasTable: !!document.querySelector('.customFilterTable'),
+            tableBody: !!document.querySelector('.customFilterTable tbody'),
+            allTbodyRows: document.querySelectorAll('tbody tr').length,
+            spinnerVisible: (() => {
+                const spinner = document.querySelector('.slds-spinner');
+                return spinner ? spinner.offsetParent !== null : false;
+            })()
+        }));
+
+        this.logger.info('Final page state:', finalStatus);
+
+        if (finalStatus.rowCount === 0) {
+            // Take a screenshot for debugging
+            try {
+                await page.screenshot({ path: './debug_no_rows.png', fullPage: false });
+                this.logger.info('Debug screenshot saved to debug_no_rows.png');
+            } catch (screenshotError) {
+                this.logger.debug('Could not save screenshot');
+            }
+            
+            throw new Error(`No table rows found. Table exists: ${finalStatus.hasTable}, All tbody rows: ${finalStatus.allTbodyRows}`);
+        }
+
+        this.logger.info(`✅ Property modal opened with ${finalStatus.rowCount} rows loaded`);
         return true;
 
     } catch (error) {
