@@ -890,99 +890,89 @@ async openPropertyModal(page) {
     }
 }
 
-/**
- * FIXED: Wait for loading spinner, then extract data
- */
-async extractPropertyData(page) {
+async openPropertyModal(page) {
     try {
-        this.logger.info('Extracting property data from Lightning table');
+        this.logger.info('Opening property listings modal');
 
-        // STEP 1: Wait for loading spinner to disappear (15-20 seconds)
-        this.logger.info('Waiting for loading spinner to disappear...');
-        
-        try {
-            // Wait for common Salesforce loading spinners to disappear
-            await page.waitForSelector('.slds-spinner', { 
-                state: 'hidden', 
-                timeout: 25000 
-            });
-            this.logger.info('✅ Loading spinner disappeared');
-        } catch (spinnerError) {
-            this.logger.warn('No loading spinner found or already gone');
-        }
-
-        // Additional wait for content to render after spinner
+        // Wait for page to stabilize
         await page.waitForTimeout(3000);
 
-        // STEP 2: Wait for table rows to appear
-        this.logger.info('Waiting for table rows to load...');
+        // Find and click the "Filter Properties" button
+        this.logger.info('Looking for Filter Properties button');
         
-        await page.waitForFunction(() => {
-            const rows = document.querySelectorAll('.customFilterTable tbody tr');
-            console.log(`Found ${rows.length} rows in table`);
-            return rows.length > 0;
-        }, {}, { timeout: 30000 });
+        const lightningFilterSelectors = [
+            'a[data-element="general-enquiry"]:has-text("Filter Properties")',
+            'a.btn:has-text("Filter Properties")',
+            'a:has-text("Filter Properties")',
+            'button:has-text("Filter Properties")',
+        ];
 
-        this.logger.info('✅ Table rows loaded');
-
-        // STEP 3: Extract data
-        const rowsData = await page.locator('.customFilterTable tbody tr').evaluateAll(rows => {
-            return rows.map(row => {
-                const cells = row.querySelectorAll('td');
-                return Array.from(cells).map(cell => {
-                    const truncateDiv = cell.querySelector('.slds-truncate');
-                    return truncateDiv ? truncateDiv.textContent.trim() : cell.textContent.trim();
-                });
-            });
-        });
-
-        this.logger.info(`Found ${rowsData.length} property rows`);
-
-        const extractedData = [];
-        
-        for (let i = 0; i < Math.min(rowsData.length, this.input.maxResults); i++) {
-            const cellTexts = rowsData[i];
-            
-            if (cellTexts.length >= 6) {
-                const property = {
-                    unitId: `sobha_${Date.now()}_${i}`,
-                    project: cellTexts[0] || 'Unknown',
-                    projectDuplicate: cellTexts[1] || '',
-                    unitType: cellTexts[2] || '',
-                    floor: cellTexts[3] || '',
-                    unitNo: cellTexts[4] || `Unit-${i + 1}`,
-                    totalUnitArea: cellTexts[5] || '',
-                    startingPrice: cellTexts[6] || '',
-                    availability: 'available',
-                    sourceUrl: page.url(),
-                    scrapedAt: new Date().toISOString()
-                };
-
-                if (property.project && property.project !== 'Unknown') {
-                    extractedData.push(property);
-                    
-                    if (i < 5) { // Log first 5 for debugging
-                        this.logger.debug(`Property ${i}: ${property.project} - ${property.unitNo}`);
-                    }
-                }
+        let buttonFound = false;
+        for (const selector of lightningFilterSelectors) {
+            try {
+                await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
+                this.logger.info(`Found button: ${selector}`);
+                await page.click(selector);
+                buttonFound = true;
+                break;
+            } catch (error) {
+                this.logger.debug(`Selector failed: ${selector}`);
             }
         }
 
-        this.logger.info(`✅ Extracted ${extractedData.length} properties successfully`);
-        return extractedData;
+        if (!buttonFound) {
+            throw new Error('Filter Properties button not found');
+        }
+
+        // Wait for modal to open
+        this.logger.info('Waiting for modal to open');
+        await page.waitForSelector('[role="dialog"], .slds-modal', { 
+            timeout: 10000,
+            state: 'visible'
+        });
+
+        // Wait for the loading spinner to appear (confirms data is loading)
+        this.logger.info('Waiting for loading spinner to appear');
+        await page.waitForSelector('.slds-spinner', { 
+            timeout: 5000,
+            state: 'visible'
+        }).catch(() => {
+            this.logger.debug('Spinner did not appear or appeared too quickly');
+        });
+
+        // CRITICAL: Wait for the loading spinner to DISAPPEAR (can take 15-20 seconds)
+        this.logger.info('Waiting for loading spinner to disappear (this may take 15-20 seconds)');
+        await page.waitForSelector('.slds-spinner', { 
+            state: 'hidden', 
+            timeout: 30000  // Increased to 30 seconds since it takes 15-20 seconds
+        }).catch(() => {
+            this.logger.debug('No spinner found or already hidden');
+        });
+
+        this.logger.info('Loading spinner disappeared, waiting for table data');
+
+        // Now wait for table rows to be populated
+        this.logger.info('Waiting for table rows to load');
+        await page.waitForFunction(() => {
+            const rows = document.querySelectorAll('.customFilterTable tbody tr');
+            console.log(`Found ${rows.length} table rows`);
+            return rows.length > 0;
+        }, {}, { timeout: 10000 });
+
+        // Additional wait for content to stabilize
+        await page.waitForTimeout(2000);
+
+        // Verify we have data
+        const rowCount = await page.evaluate(() => {
+            return document.querySelectorAll('.customFilterTable tbody tr').length;
+        });
+
+        this.logger.info(`✅ Property modal opened with ${rowCount} rows loaded`);
+        return true;
 
     } catch (error) {
-        this.logger.error('Property extraction failed', { 
-            error: error.message,
-            stack: error.stack 
-        });
-        
-        return [{
-            unitId: `error_${Date.now()}`,
-            project: 'Extraction Error',
-            errorInfo: error.message,
-            scrapedAt: new Date().toISOString()
-        }];
+        this.logger.error('Failed to open property modal', { error: error.message });
+        throw error;
     }
 }
     /**
