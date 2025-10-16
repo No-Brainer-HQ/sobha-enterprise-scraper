@@ -830,13 +830,7 @@ class EnterpriseSobhaPortalScraper {
         }
     }
 
-    /**
-     * ENHANCED: Open property modal with Lightning component awareness
-     */
-    /**
- * FIXED: Open property modal with correct modal detection
- */
-async openPropertyModal(page) {
+ async openPropertyModal(page) {
     try {
         this.logger.info('Opening property listings modal');
 
@@ -870,99 +864,62 @@ async openPropertyModal(page) {
             throw new Error('Filter Properties button not found');
         }
 
-        // Wait for the CORRECT modal (with the property table, not error dialog)
-        this.logger.info('Waiting for property modal with table');
-        
-        await page.waitForSelector('.customFilterTable.slds-table', { 
-            timeout: CONFIG.MODAL_WAIT,
-            state: 'visible'
-        });
-
-        // Additional wait for table content to load
-        await page.waitForTimeout(3000);
-
-        this.logger.info('✅ Property modal with table opened successfully');
-        return true;
-
-    } catch (error) {
-        this.logger.error('Failed to open property modal', { error: error.message });
-        throw error;
-    }
-}
-
-async openPropertyModal(page) {
-    try {
-        this.logger.info('Opening property listings modal');
-
-        // Wait for page to stabilize
-        await page.waitForTimeout(3000);
-
-        // Find and click the "Filter Properties" button
-        this.logger.info('Looking for Filter Properties button');
-        
-        const lightningFilterSelectors = [
-            'a[data-element="general-enquiry"]:has-text("Filter Properties")',
-            'a.btn:has-text("Filter Properties")',
-            'a:has-text("Filter Properties")',
-            'button:has-text("Filter Properties")',
-        ];
-
-        let buttonFound = false;
-        for (const selector of lightningFilterSelectors) {
-            try {
-                await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
-                this.logger.info(`Found button: ${selector}`);
-                await page.click(selector);
-                buttonFound = true;
-                break;
-            } catch (error) {
-                this.logger.debug(`Selector failed: ${selector}`);
-            }
-        }
-
-        if (!buttonFound) {
-            throw new Error('Filter Properties button not found');
-        }
-
-        // Wait for modal to open
-        this.logger.info('Waiting for modal to open');
-        await page.waitForSelector('[role="dialog"], .slds-modal', { 
+        // FIXED: Wait for SPECIFIC modal elements (not generic dialog that matches error)
+        this.logger.info('Waiting for property modal to open');
+        await page.waitForSelector('.customModelContent, .tableScroller', { 
             timeout: 10000,
-            state: 'visible'
+            state: 'attached'  // Just needs to exist in DOM
         });
 
-        // Wait for the loading spinner to appear (confirms data is loading)
+        this.logger.info('Modal opened, checking for errors');
+
+        // Check for Aura error dialog
+        const hasError = await page.evaluate(() => {
+            const errorDialog = document.querySelector('#auraError');
+            if (errorDialog && errorDialog.offsetParent !== null) {
+                return errorDialog.textContent || 'Unknown error';
+            }
+            return null;
+        });
+
+        if (hasError) {
+            this.logger.error('Aura error detected', { error: hasError });
+            throw new Error(`Salesforce error: ${hasError}`);
+        }
+
+        // Wait for loading spinner to appear
         this.logger.info('Waiting for loading spinner to appear');
         await page.waitForSelector('.slds-spinner', { 
             timeout: 5000,
             state: 'visible'
         }).catch(() => {
-            this.logger.debug('Spinner did not appear or appeared too quickly');
+            this.logger.debug('Spinner did not appear or loaded instantly');
         });
 
-        // CRITICAL: Wait for the loading spinner to DISAPPEAR (can take 15-20 seconds)
-        this.logger.info('Waiting for loading spinner to disappear (this may take 15-20 seconds)');
-        await page.waitForSelector('.slds-spinner', { 
-            state: 'hidden', 
-            timeout: 30000  // Increased to 30 seconds since it takes 15-20 seconds
-        }).catch(() => {
-            this.logger.debug('No spinner found or already hidden');
-        });
+        // CRITICAL: Wait for spinner to DISAPPEAR (15-20 seconds)
+        this.logger.info('Waiting for loading spinner to disappear (may take 15-20 seconds)');
+        await page.waitForFunction(() => {
+            const spinner = document.querySelector('.slds-spinner');
+            const isHidden = !spinner || spinner.offsetParent === null;
+            if (!isHidden) {
+                console.log('Spinner still visible...');
+            }
+            return isHidden;
+        }, {}, { timeout: 30000 });
 
-        this.logger.info('Loading spinner disappeared, waiting for table data');
+        this.logger.info('Spinner disappeared, waiting for table rows');
 
-        // Now wait for table rows to be populated
-        this.logger.info('Waiting for table rows to load');
+        // Wait for table rows to populate
         await page.waitForFunction(() => {
             const rows = document.querySelectorAll('.customFilterTable tbody tr');
             console.log(`Found ${rows.length} table rows`);
             return rows.length > 0;
         }, {}, { timeout: 10000 });
 
-        // Additional wait for content to stabilize
+        // Additional stability wait
         await page.waitForTimeout(2000);
 
-        // Verify we have data
+        // Verify data loaded
         const rowCount = await page.evaluate(() => {
             return document.querySelectorAll('.customFilterTable tbody tr').length;
         });
