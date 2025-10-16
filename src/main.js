@@ -891,25 +891,41 @@ async openPropertyModal(page) {
 }
 
 /**
- * FIXED: Extract property data with better row waiting
+ * FIXED: Wait for loading spinner, then extract data
  */
 async extractPropertyData(page) {
     try {
         this.logger.info('Extracting property data from Lightning table');
 
-        // Wait longer for rows to appear - table loads but rows take time
+        // STEP 1: Wait for loading spinner to disappear (15-20 seconds)
+        this.logger.info('Waiting for loading spinner to disappear...');
+        
+        try {
+            // Wait for common Salesforce loading spinners to disappear
+            await page.waitForSelector('.slds-spinner', { 
+                state: 'hidden', 
+                timeout: 25000 
+            });
+            this.logger.info('✅ Loading spinner disappeared');
+        } catch (spinnerError) {
+            this.logger.warn('No loading spinner found or already gone');
+        }
+
+        // Additional wait for content to render after spinner
+        await page.waitForTimeout(3000);
+
+        // STEP 2: Wait for table rows to appear
         this.logger.info('Waiting for table rows to load...');
         
         await page.waitForFunction(() => {
             const rows = document.querySelectorAll('.customFilterTable tbody tr');
             console.log(`Found ${rows.length} rows in table`);
             return rows.length > 0;
-        }, {}, { timeout: 30000 }); // 30 second timeout
+        }, {}, { timeout: 30000 });
 
-        // Additional wait for content to stabilize
-        await page.waitForTimeout(2000);
+        this.logger.info('✅ Table rows loaded');
 
-        // Extract using evaluateAll
+        // STEP 3: Extract data
         const rowsData = await page.locator('.customFilterTable tbody tr').evaluateAll(rows => {
             return rows.map(row => {
                 const cells = row.querySelectorAll('td');
@@ -944,15 +960,22 @@ async extractPropertyData(page) {
 
                 if (property.project && property.project !== 'Unknown') {
                     extractedData.push(property);
+                    
+                    if (i < 5) { // Log first 5 for debugging
+                        this.logger.debug(`Property ${i}: ${property.project} - ${property.unitNo}`);
+                    }
                 }
             }
         }
 
-        this.logger.info(`✅ Extracted ${extractedData.length} properties`);
+        this.logger.info(`✅ Extracted ${extractedData.length} properties successfully`);
         return extractedData;
 
     } catch (error) {
-        this.logger.error('Property extraction failed', { error: error.message });
+        this.logger.error('Property extraction failed', { 
+            error: error.message,
+            stack: error.stack 
+        });
         
         return [{
             unitId: `error_${Date.now()}`,
@@ -962,7 +985,6 @@ async extractPropertyData(page) {
         }];
     }
 }
-
     /**
      * Main enhanced scraping workflow with Lightning table extraction
      */
