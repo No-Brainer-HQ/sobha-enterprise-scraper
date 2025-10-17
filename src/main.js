@@ -831,8 +831,8 @@ class EnterpriseSobhaPortalScraper {
     }
 
 /**
- * REPLACE the openPropertyModal function in your main.js with this version
- * This version uses the correct selectors that we verified exist in the DOM
+ * WORKING FIX: Replace openPropertyModal function in main.js
+ * Uses the correct DOM structure we found
  */
 async openPropertyModal(page) {
     try {
@@ -868,79 +868,118 @@ async openPropertyModal(page) {
             throw new Error('Filter Properties button not found');
         }
 
-        // Wait for modal to appear - using correct selectors
-        this.logger.info('Waiting for modal container to appear');
+        // Wait for modal container structure - using the exact hierarchy we found
+        this.logger.info('Waiting for modal structure to appear');
         
-        try {
-            await page.waitForSelector('.customModelContent, .tableScroller, .slds-modal__content', { 
-                timeout: 15000,
-                state: 'visible'
-            });
-            this.logger.info('Modal container appeared');
-        } catch (error) {
-            this.logger.error('Modal container did not appear', { error: error.message });
-            throw error;
-        }
+        // First wait for the modal container
+        await page.waitForSelector('.slds-modal__container', { 
+            timeout: 15000,
+            state: 'visible'
+        });
+        this.logger.info('Modal container appeared');
 
-        // Additional wait for content to start loading
-        await page.waitForTimeout(3000);
+        // Then wait for the content wrapper
+        await page.waitForSelector('.customModelContent, .slds-modal__content', { 
+            timeout: 10000,
+            state: 'visible'
+        });
+        this.logger.info('Modal content wrapper appeared');
 
-        // Wait for the table to exist
-        this.logger.info('Waiting for table structure to load');
+        // Wait for the tableScroller div
+        await page.waitForSelector('.tableScroller', { 
+            timeout: 10000,
+            state: 'visible'
+        });
+        this.logger.info('Table scroller container appeared');
+
+        // Now wait for the actual table to be injected into the DOM
+        this.logger.info('Waiting for customFilterTable to be injected...');
         
-        try {
-            await page.waitForSelector('table.customFilterTable', { 
-                timeout: 10000,
-                state: 'visible'
-            });
-            this.logger.info('Table structure loaded');
-        } catch (error) {
-            this.logger.warn('customFilterTable not found, trying fallback');
-            await page.waitForSelector('table', { timeout: 10000, state: 'visible' });
-        }
-
-        // Now wait for data rows with the specific class we found
-        this.logger.info('Waiting for property data rows to load...');
-        
-        let rowCount = 0;
+        let tableFound = false;
         let attempts = 0;
-        const maxAttempts = 12; // 60 seconds total
+        const maxAttempts = 20; // 60 seconds
         
-        while (rowCount === 0 && attempts < maxAttempts) {
+        while (!tableFound && attempts < maxAttempts) {
             attempts++;
             
-            rowCount = await page.evaluate(() => {
-                // Use the selector we confirmed has 25 rows
-                const rows = document.querySelectorAll('tr.slds-hint-parent');
-                return rows.length;
+            // Check if the table exists now
+            tableFound = await page.evaluate(() => {
+                const table = document.querySelector('.customFilterTable');
+                if (table) {
+                    console.log('Table found in DOM');
+                    return true;
+                }
+                
+                // Also check by table tag within tableScroller
+                const tableInScroller = document.querySelector('.tableScroller table');
+                if (tableInScroller) {
+                    console.log('Table found via tableScroller');
+                    return true;
+                }
+                
+                return false;
             });
             
-            if (rowCount > 0) {
-                this.logger.info(`✅ Data loaded: ${rowCount} property rows found after ${attempts * 5} seconds`);
+            if (tableFound) {
+                this.logger.info(`Table appeared after ${attempts * 3} seconds`);
                 break;
             }
             
-            this.logger.info(`Attempt ${attempts}/${maxAttempts}: Still loading... (${rowCount} rows)`);
-            await page.waitForTimeout(5000);
+            this.logger.debug(`Attempt ${attempts}/${maxAttempts}: Waiting for table...`);
+            await page.waitForTimeout(3000);
         }
 
-        if (rowCount === 0) {
+        if (!tableFound) {
             const debugInfo = await page.evaluate(() => {
                 return {
-                    hasTable: !!document.querySelector('table'),
-                    hasCustomFilterTable: !!document.querySelector('.customFilterTable'),
-                    allRows: document.querySelectorAll('tr').length,
-                    tbodyRows: document.querySelectorAll('tbody tr').length,
-                    sldsHintParentRows: document.querySelectorAll('tr.slds-hint-parent').length
+                    hasModalContainer: !!document.querySelector('.slds-modal__container'),
+                    hasCustomModelContent: !!document.querySelector('.customModelContent'),
+                    hasTableScroller: !!document.querySelector('.tableScroller'),
+                    tableScrollerContent: document.querySelector('.tableScroller')?.innerHTML?.substring(0, 200)
                 };
             });
             
-            this.logger.error('No data rows found after waiting', debugInfo);
-            await page.screenshot({ path: './debug_no_data.png', fullPage: false });
-            throw new Error(`No property data loaded. Debug: ${JSON.stringify(debugInfo)}`);
+            this.logger.error('Table never appeared', debugInfo);
+            throw new Error('customFilterTable never loaded');
         }
 
-        this.logger.info(`✅ Property modal opened successfully with ${rowCount} properties`);
+        // Now wait for data rows to populate
+        this.logger.info('Table exists, waiting for data rows...');
+        
+        let rowCount = 0;
+        attempts = 0;
+        const maxRowAttempts = 20;
+        
+        while (rowCount === 0 && attempts < maxRowAttempts) {
+            attempts++;
+            
+            rowCount = await page.evaluate(() => {
+                // Look for rows with the slds-hint-parent class
+                const rows = document.querySelectorAll('tr.slds-hint-parent');
+                if (rows.length > 0) {
+                    return rows.length;
+                }
+                
+                // Fallback: any tr with td elements in the customFilterTable
+                const tableRows = document.querySelectorAll('.customFilterTable tbody tr');
+                const dataRows = Array.from(tableRows).filter(row => row.querySelector('td'));
+                return dataRows.length;
+            });
+            
+            if (rowCount > 0) {
+                this.logger.info(`✅ Data loaded: ${rowCount} property rows found`);
+                break;
+            }
+            
+            this.logger.debug(`Attempt ${attempts}/${maxRowAttempts}: No rows yet...`);
+            await page.waitForTimeout(3000);
+        }
+
+        if (rowCount === 0) {
+            throw new Error('No property data rows loaded after waiting');
+        }
+
+        this.logger.info(`✅ Property modal fully loaded with ${rowCount} properties`);
         return true;
 
     } catch (error) {
@@ -950,65 +989,47 @@ async openPropertyModal(page) {
 }
 
 /**
- * ADD this new function to your main.js (it's missing in your current code)
- * This extracts the actual property data from the Lightning table
+ * Extract property data from the table
  */
 async extractPropertyData(page) {
     try {
-        this.logger.info('Starting property data extraction from Lightning table');
+        this.logger.info('Starting property data extraction');
 
-        // Wait a bit for table to be fully rendered
         await page.waitForTimeout(2000);
 
-        // Extract data from the table
         const properties = await page.evaluate(() => {
             const extractedProperties = [];
             
-            // Use the selector we confirmed works: tr.slds-hint-parent
+            // Get all data rows
             const rows = document.querySelectorAll('tr.slds-hint-parent');
-            
-            console.log(`Found ${rows.length} rows to extract`);
             
             rows.forEach((row, index) => {
                 try {
                     const cells = row.querySelectorAll('td');
                     
                     if (cells.length >= 7) {
-                        // Helper function to extract text
                         const getCellText = (cell) => {
                             const div = cell.querySelector('div.slds-truncate');
-                            if (div) {
-                                // Use title attribute if available, otherwise text content
-                                return div.getAttribute('title') || div.textContent?.trim() || '';
-                            }
-                            return cell.textContent?.trim() || '';
+                            return div ? (div.getAttribute('title') || div.textContent?.trim() || '') : cell.textContent?.trim() || '';
                         };
                         
-                        // Extract button info
                         const button = cells[7]?.querySelector('button');
-                        const buttonId = button?.getAttribute('name') || '';
                         
                         const property = {
-                            // Row identification
                             rowIndex: index + 1,
-                            
-                            // Property details (matching the actual column order in the table)
-                            projectCategory: getCellText(cells[0]),  // e.g., "Sobha Hartland"
-                            project: getCellText(cells[1]),          // e.g., "Sobha Creek Vista Heights"
-                            unitType: getCellText(cells[2]),         // e.g., "1 Bed Type C"
-                            floor: getCellText(cells[3]),            // e.g., "41"
-                            unitNo: getCellText(cells[4]),           // e.g., "SSH-A4105"
-                            totalUnitArea: getCellText(cells[5]),    // e.g., "1176.92"
-                            startingPrice: getCellText(cells[6]),    // e.g., "5,178,448"
-                            
-                            // Additional processed fields
-                            recordId: buttonId,  // Salesforce record ID
+                            projectCategory: getCellText(cells[0]),
+                            project: getCellText(cells[1]),
+                            unitType: getCellText(cells[2]),
+                            floor: getCellText(cells[3]),
+                            unitNo: getCellText(cells[4]),
+                            totalUnitArea: getCellText(cells[5]),
+                            startingPrice: getCellText(cells[6]),
+                            recordId: button?.getAttribute('name') || '',
                             floorNumber: parseInt(getCellText(cells[3])) || null,
                             area: parseFloat(getCellText(cells[5])) || null,
                             price: parseFloat(getCellText(cells[6])?.replace(/,/g, '')) || null
                         };
                         
-                        // Only add if we have meaningful data
                         if (property.unitNo && property.project) {
                             extractedProperties.push(property);
                         }
@@ -1021,34 +1042,10 @@ async extractPropertyData(page) {
             return extractedProperties;
         });
 
-        this.logger.info(`✅ Extracted ${properties.length} properties from Lightning table`);
-
-        // Record metrics
+        this.logger.info(`✅ Extracted ${properties.length} properties`);
         this.metrics.recordPropertiesScraped(properties.length);
 
-        // Check for pagination or Load More button
-        const hasMorePages = await page.evaluate(() => {
-            const loadMoreButton = document.querySelector('button:has-text("Load More"), a:has-text("Load More")');
-            return !!loadMoreButton;
-        });
-
-        if (hasMorePages && properties.length < this.input.maxResults) {
-            this.logger.info('Load More button detected, loading more properties...');
-            try {
-                await page.click('button:has-text("Load More"), a:has-text("Load More")');
-                await page.waitForTimeout(5000);
-                
-                // Recursively extract more data
-                const moreProperties = await this.extractPropertyData(page);
-                properties.push(...moreProperties);
-            } catch (error) {
-                this.logger.warn('Could not load more properties', { error: error.message });
-            }
-        }
-
-        // Limit results to maxResults
         if (this.input.maxResults && properties.length > this.input.maxResults) {
-            this.logger.info(`Limiting results from ${properties.length} to ${this.input.maxResults}`);
             return properties.slice(0, this.input.maxResults);
         }
 
