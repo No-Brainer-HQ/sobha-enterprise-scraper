@@ -830,7 +830,7 @@ class EnterpriseSobhaPortalScraper {
         }
     }
 
- async openPropertyModal(page) {
+async openPropertyModal(page) {
     try {
         this.logger.info('Opening property listings modal');
 
