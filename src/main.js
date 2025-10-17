@@ -868,11 +868,25 @@ async openPropertyModal(page) {
         }
 
         // Wait for modal section to appear (using your exact structure)
-        this.logger.info('Waiting for property modal to open');
+        this.logger.info('Waiting for property modal to open (20 second timeout)');
         await page.waitForSelector('c-broker-portal-unit-filter-component section', { 
-            timeout: 10000,
-            state: 'visible'
+            timeout: 20000,  // Increased to 20 seconds
+            state: 'attached'  // Changed to 'attached' instead of 'visible'
         });
+
+        // Additional wait to ensure modal is fully rendered
+        await page.waitForTimeout(2000);
+        
+        // Verify modal is actually there and interactive
+        const modalReady = await page.evaluate(() => {
+            const section = document.querySelector('c-broker-portal-unit-filter-component section');
+            return section && section.offsetParent !== null;
+        });
+        
+        if (!modalReady) {
+            this.logger.warn('Modal section found but not interactive, waiting more...');
+            await page.waitForTimeout(3000);
+        }
 
         this.logger.info('Modal opened, checking for errors');
 
@@ -935,7 +949,7 @@ async openPropertyModal(page) {
         // Debug - see what we found
         const tableInfo = await page.evaluate(() => {
             // Find modal content div with dynamic ID
-            const modalContent = document.querySelector('[id^="modal-content-id-1-13281"]');
+            const modalContent = document.querySelector('[id^="modal-content-id-"]');
             const table = modalContent ? modalContent.querySelector('table') : null;
             const tbody = table ? table.querySelector('tbody') : null;
             const rows = tbody ? tbody.querySelectorAll('tr') : [];
@@ -1024,6 +1038,100 @@ async openPropertyModal(page) {
         throw error;
     }
 }
+
+/**
+ * Extract property data using exact selectors
+ */
+async extractPropertyData(page) {
+    try {
+        this.logger.info('Starting property data extraction with exact selectors');
+
+        await page.waitForTimeout(2000);
+
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            
+            // Find the modal content div with dynamic ID
+            const modalContent = document.querySelector('[id^="modal-content-id-"]');
+            if (!modalContent) {
+                console.error('Modal content not found');
+                return [];
+            }
+            
+            // Get the tbody
+            const tbody = modalContent.querySelector('table tbody');
+            if (!tbody) {
+                console.error('Table tbody not found');
+                return [];
+            }
+            
+            // Get all rows
+            const rows = tbody.querySelectorAll('tr');
+            console.log(`Found ${rows.length} rows to extract`);
+            
+            rows.forEach((row, index) => {
+                try {
+                    const cells = row.querySelectorAll('td');
+                    
+                    if (cells.length >= 7) {
+                        const getCellText = (cell) => {
+                            // Try to get text from div.slds-truncate first
+                            const truncateDiv = cell.querySelector('div.slds-truncate');
+                            if (truncateDiv) {
+                                return truncateDiv.getAttribute('title') || truncateDiv.textContent?.trim() || '';
+                            }
+                            // Otherwise get direct text
+                            return cell.textContent?.trim() || '';
+                        };
+                        
+                        // Look for action button
+                        const button = cells[cells.length - 1]?.querySelector('button') || 
+                                     cells[7]?.querySelector('button');
+                        
+                        const property = {
+                            rowIndex: index + 1,
+                            projectCategory: getCellText(cells[0]),
+                            project: getCellText(cells[1]),
+                            unitType: getCellText(cells[2]),
+                            floor: getCellText(cells[3]),
+                            unitNo: getCellText(cells[4]),
+                            totalUnitArea: getCellText(cells[5]),
+                            startingPrice: getCellText(cells[6]),
+                            recordId: button?.getAttribute('name') || button?.getAttribute('data-id') || '',
+                            // Parsed values
+                            floorNumber: parseInt(getCellText(cells[3])) || null,
+                            area: parseFloat(getCellText(cells[5])?.replace(/[^0-9.]/g, '')) || null,
+                            price: parseFloat(getCellText(cells[6])?.replace(/[^0-9.]/g, '')) || null
+                        };
+                        
+                        // Only add if we have some data
+                        if (property.unitNo || property.project) {
+                            extractedProperties.push(property);
+                        }
+                    }
+                } catch (rowError) {
+                    console.error(`Error extracting row ${index}:`, rowError.message);
+                }
+            });
+            
+            return extractedProperties;
+        });
+
+        this.logger.info(`✅ Extracted ${properties.length} properties`);
+        this.metrics.recordPropertiesScraped(properties.length);
+
+        // Limit to maxResults if needed
+        if (this.input.maxResults && properties.length > this.input.maxResults) {
+            return properties.slice(0, this.input.maxResults);
+        }
+
+        return properties;
+
+    } catch (error) {
+        this.logger.error('Failed to extract property data', { error: error.message });
+        return [];
+    }
+}    
 
 /**
  * Extract property data using exact selectors
