@@ -830,6 +830,7 @@ class EnterpriseSobhaPortalScraper {
         }
     }
 
+// Replace the openPropertyModal function with this:
 async openPropertyModal(page) {
     try {
         this.logger.info('Opening property listings modal');
@@ -864,14 +865,38 @@ async openPropertyModal(page) {
             throw new Error('Filter Properties button not found');
         }
 
-        // Wait for SPECIFIC modal elements
-        this.logger.info('Waiting for property modal to open');
-        await page.waitForSelector('.customModelContent, .tableScroller', { 
-            timeout: 10000,
-            state: 'attached'
-        });
+        // CRITICAL FIX: Wait for modal to be visible, not just attached
+        this.logger.info('Waiting for property modal to open and become visible');
+        
+        // Try multiple selectors for the modal content
+        const modalSelectors = [
+            '.customModelContent',
+            '.tableScroller', 
+            '.slds-modal__content',
+            '[role="dialog"] .slds-modal__content'
+        ];
+        
+        let modalFound = false;
+        for (const selector of modalSelectors) {
+            try {
+                await page.waitForSelector(selector, { 
+                    timeout: 5000,
+                    state: 'visible'  // Changed from 'attached' to 'visible'
+                });
+                this.logger.info(`Modal found with selector: ${selector}`);
+                modalFound = true;
+                break;
+            } catch (error) {
+                this.logger.debug(`Modal selector not found: ${selector}`);
+            }
+        }
 
-        this.logger.info('Modal opened, checking for errors');
+        if (!modalFound) {
+            throw new Error('Modal did not open properly');
+        }
+
+        // Additional wait for modal animation
+        await page.waitForTimeout(2000);
 
         // Check for Aura error
         const hasError = await page.evaluate(() => {
@@ -887,78 +912,188 @@ async openPropertyModal(page) {
             throw new Error(`Salesforce error: ${hasError}`);
         }
 
-        // DEBUGGING: Check what's on the page immediately
-        const debugBefore = await page.evaluate(() => ({
-            hasTable: !!document.querySelector('.customFilterTable'),
-            hasTableScroller: !!document.querySelector('.tableScroller'),
-            hasCustomModalContent: !!document.querySelector('.customModelContent'),
-            tableSelector: '.customFilterTable tbody tr',
-            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
-            spinnerCount: document.querySelectorAll('.slds-spinner').length,
-            spinnerVisible: (() => {
+        // Wait for spinner to disappear
+        this.logger.info('Waiting for spinner to disappear...');
+        try {
+            await page.waitForFunction(() => {
                 const spinner = document.querySelector('.slds-spinner');
-                return spinner ? spinner.offsetParent !== null : false;
-            })(),
-            modalText: document.querySelector('.customModelContent, .tableScroller')?.textContent?.substring(0, 200) || 'No modal text'
-        }));
+                return !spinner || spinner.offsetParent === null;
+            }, { timeout: 30000 });
+        } catch (error) {
+            this.logger.warn('Spinner wait timeout, continuing anyway');
+        }
 
-        this.logger.info('Page state BEFORE waiting:', debugBefore);
-
-        // Wait for data to load with periodic checks
-        this.logger.info('Waiting for data to load with status updates...');
+        // Now wait for the table to load with better selectors
+        this.logger.info('Waiting for property table to load...');
         
-        for (let i = 0; i < 6; i++) {  // Check every 5 seconds for 30 seconds total
-            await page.waitForTimeout(5000);
-            
-            const status = await page.evaluate(() => ({
-                rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
-                spinnerVisible: (() => {
-                    const spinner = document.querySelector('.slds-spinner');
-                    return spinner ? spinner.offsetParent !== null : false;
-                })()
-            }));
-            
-            this.logger.info(`Check ${i + 1}/6: Rows=${status.rowCount}, Spinner=${status.spinnerVisible}`);
-            
-            // If we have rows and no spinner, we're done!
-            if (status.rowCount > 0 && !status.spinnerVisible) {
-                this.logger.info(`✅ Data loaded after ${(i + 1) * 5} seconds`);
-                break;
-            }
-        }
+        const tableSelectors = [
+            '.customFilterTable tbody tr',
+            'table tbody tr',
+            '.slds-table tbody tr',
+            'tbody tr.slds-hint-parent'
+        ];
 
-        // Final verification
-        const finalStatus = await page.evaluate(() => ({
-            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
-            hasTable: !!document.querySelector('.customFilterTable'),
-            tableBody: !!document.querySelector('.customFilterTable tbody'),
-            allTbodyRows: document.querySelectorAll('tbody tr').length,
-            spinnerVisible: (() => {
-                const spinner = document.querySelector('.slds-spinner');
-                return spinner ? spinner.offsetParent !== null : false;
-            })()
-        }));
-
-        this.logger.info('Final page state:', finalStatus);
-
-        if (finalStatus.rowCount === 0) {
-            // Take a screenshot for debugging
+        let tableFound = false;
+        let finalRowCount = 0;
+        
+        for (const selector of tableSelectors) {
             try {
-                await page.screenshot({ path: './debug_no_rows.png', fullPage: false });
-                this.logger.info('Debug screenshot saved to debug_no_rows.png');
-            } catch (screenshotError) {
-                this.logger.debug('Could not save screenshot');
+                // Wait for at least one row to appear
+                await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
+                
+                // Count the rows
+                finalRowCount = await page.evaluate((sel) => {
+                    return document.querySelectorAll(sel).length;
+                }, selector);
+                
+                if (finalRowCount > 0) {
+                    this.logger.info(`✅ Table loaded with selector: ${selector}, Rows: ${finalRowCount}`);
+                    tableFound = true;
+                    break;
+                }
+            } catch (error) {
+                this.logger.debug(`Table selector not found: ${selector}`);
             }
-            
-            throw new Error(`No table rows found. Table exists: ${finalStatus.hasTable}, All tbody rows: ${finalStatus.allTbodyRows}`);
         }
 
-        this.logger.info(`✅ Property modal opened with ${finalStatus.rowCount} rows loaded`);
+        if (!tableFound || finalRowCount === 0) {
+            // Try to get more debugging info
+            const pageContent = await page.evaluate(() => {
+                const modal = document.querySelector('.customModelContent, .tableScroller, .slds-modal__content');
+                return {
+                    modalExists: !!modal,
+                    modalText: modal ? modal.textContent.substring(0, 500) : 'No modal',
+                    hasAnyTable: !!document.querySelector('table'),
+                    bodyHasRows: document.querySelectorAll('tbody tr').length,
+                    allTables: Array.from(document.querySelectorAll('table')).map(t => ({
+                        classes: t.className,
+                        rowCount: t.querySelectorAll('tbody tr').length
+                    }))
+                };
+            });
+            
+            this.logger.error('Table not found - debug info:', pageContent);
+            
+            throw new Error(`No property rows found in modal. Debug: ${JSON.stringify(pageContent)}`);
+        }
+
+        this.logger.info(`✅ Property modal opened successfully with ${finalRowCount} properties`);
         return true;
 
     } catch (error) {
         this.logger.error('Failed to open property modal', { error: error.message });
+        
+        // Take a screenshot for debugging
+        try {
+            await page.screenshot({ path: './debug_modal_error.png', fullPage: false });
+            this.logger.info('Debug screenshot saved to debug_modal_error.png');
+        } catch (screenshotError) {
+            this.logger.debug('Could not save screenshot');
+        }
+        
         throw error;
+    }
+}
+
+// Add this missing function for extracting property data:
+async extractPropertyData(page) {
+    try {
+        this.logger.info('Starting property data extraction from modal');
+
+        // Wait a bit for table to be fully rendered
+        await page.waitForTimeout(2000);
+
+        // Extract data from the table
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            
+            // Try multiple table selectors
+            const tables = [
+                document.querySelector('.customFilterTable'),
+                document.querySelector('.slds-table'),
+                document.querySelector('table')
+            ].filter(t => t !== null);
+            
+            if (tables.length === 0) {
+                console.error('No table found for data extraction');
+                return [];
+            }
+            
+            const table = tables[0];
+            const rows = table.querySelectorAll('tbody tr');
+            
+            console.log(`Found ${rows.length} rows to extract`);
+            
+            rows.forEach((row, index) => {
+                try {
+                    const cells = row.querySelectorAll('td');
+                    
+                    if (cells.length >= 4) {  // Assuming minimum 4 columns
+                        const property = {
+                            rowIndex: index + 1,
+                            unitNo: cells[0]?.textContent?.trim() || '',
+                            project: cells[1]?.textContent?.trim() || '',
+                            bedrooms: cells[2]?.textContent?.trim() || '',
+                            price: cells[3]?.textContent?.trim() || '',
+                            // Add more fields based on actual table structure
+                            floorArea: cells[4]?.textContent?.trim() || '',
+                            view: cells[5]?.textContent?.trim() || '',
+                            status: cells[6]?.textContent?.trim() || '',
+                            // Get any links in the row
+                            detailsLink: row.querySelector('a')?.href || ''
+                        };
+                        
+                        // Only add if we have meaningful data
+                        if (property.unitNo || property.project) {
+                            extractedProperties.push(property);
+                        }
+                    }
+                } catch (rowError) {
+                    console.error(`Error extracting row ${index}:`, rowError);
+                }
+            });
+            
+            return extractedProperties;
+        });
+
+        this.logger.info(`Extracted ${properties.length} properties from modal`);
+
+        // Record metrics
+        this.metrics.recordPropertiesScraped(properties.length);
+
+        // If we need to paginate or load more
+        if (properties.length === 0) {
+            this.logger.warn('No properties extracted, checking for pagination or load more button');
+            
+            // Check for "Load More" button
+            const hasLoadMore = await page.evaluate(() => {
+                const loadMoreBtn = document.querySelector('button:has-text("Load More"), a:has-text("Load More")');
+                return !!loadMoreBtn;
+            });
+            
+            if (hasLoadMore) {
+                this.logger.info('Load More button found, clicking it');
+                await page.click('button:has-text("Load More"), a:has-text("Load More")');
+                await page.waitForTimeout(3000);
+                
+                // Recursive call to extract more data
+                return await this.extractPropertyData(page);
+            }
+        }
+
+        // Limit to maxResults if specified
+        if (this.input.maxResults && properties.length > this.input.maxResults) {
+            this.logger.info(`Limiting results from ${properties.length} to ${this.input.maxResults}`);
+            return properties.slice(0, this.input.maxResults);
+        }
+
+        return properties;
+
+    } catch (error) {
+        this.logger.error('Failed to extract property data', { error: error.message });
+        
+        // Return empty array rather than throwing
+        return [];
     }
 }
     /**
