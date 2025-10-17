@@ -831,8 +831,8 @@ class EnterpriseSobhaPortalScraper {
     }
 
 /**
- * FINAL WORKING VERSION: Replace openPropertyModal function in main.js
- * This handles the loading spinner that appears for 10-20 seconds
+ * RESTORED VERSION: Using your ORIGINAL working modal detection
+ * Only adding spinner handling to fix the actual issue
  */
 async openPropertyModal(page) {
     try {
@@ -868,173 +868,140 @@ async openPropertyModal(page) {
             throw new Error('Filter Properties button not found');
         }
 
-        // CRITICAL: Wait for the modal to appear with ANY of its possible states
-        this.logger.info('Waiting for modal to appear (may have loading spinner)...');
-        
-        // The modal might appear with different classes at different times
-        await page.waitForSelector('div[class*="modal"], div[role="dialog"], .slds-modal, .slds-modal__container', { 
-            timeout: 30000,
-            state: 'attached' // Use 'attached' not 'visible' as modal might be loading
+        // YOUR ORIGINAL CODE THAT WAS WORKING - Modal detection
+        this.logger.info('Waiting for property modal to open');
+        await page.waitForSelector('.customModelContent, .tableScroller', { 
+            timeout: 10000,
+            state: 'attached'  // Keep as 'attached' like your original
         });
+
+        this.logger.info('Modal opened, checking for errors');
+
+        // Check for Aura error (from your original code)
+        const hasError = await page.evaluate(() => {
+            const errorDialog = document.querySelector('#auraError');
+            if (errorDialog && errorDialog.offsetParent !== null) {
+                return errorDialog.textContent || 'Unknown error';
+            }
+            return null;
+        });
+
+        if (hasError) {
+            this.logger.error('Aura error detected', { error: hasError });
+            throw new Error(`Salesforce error: ${hasError}`);
+        }
+
+        // NEW ADDITION: Wait for spinner to disappear (the only thing that was missing)
+        this.logger.info('Waiting for loading spinner to disappear (10-20 seconds)...');
         
-        this.logger.info('Modal detected, now waiting for spinner to disappear...');
-        
-        // CRITICAL: Wait for the loading spinner to disappear (10-20 seconds)
         let spinnerGone = false;
-        let spinnerAttempts = 0;
-        const maxSpinnerAttempts = 30; // 90 seconds total for spinner
+        let attempts = 0;
+        const maxAttempts = 30; // 90 seconds total
         
-        while (!spinnerGone && spinnerAttempts < maxSpinnerAttempts) {
-            spinnerAttempts++;
+        while (!spinnerGone && attempts < maxAttempts) {
+            attempts++;
             
             spinnerGone = await page.evaluate(() => {
-                // Check for various spinner selectors
-                const spinners = document.querySelectorAll(
-                    '.slds-spinner, .lightning-spinner, [class*="spinner"], [class*="loading"]'
-                );
-                
-                // Check if any spinner is visible
-                for (const spinner of spinners) {
-                    if (spinner && spinner.offsetParent !== null) {
-                        console.log('Spinner still visible, waiting...');
-                        return false; // Spinner still visible
-                    }
+                const spinner = document.querySelector('.slds-spinner');
+                if (spinner && spinner.offsetParent !== null) {
+                    return false; // Spinner still visible
                 }
-                
-                // Also check for loading text
-                const bodyText = document.body.textContent || '';
-                if (bodyText.includes('Loading') || bodyText.includes('Please wait')) {
-                    console.log('Loading text still present');
-                    return false;
-                }
-                
                 return true; // No visible spinner
             });
             
             if (spinnerGone) {
-                this.logger.info(`✅ Loading spinner disappeared after ${spinnerAttempts * 3} seconds`);
+                this.logger.info(`✅ Spinner disappeared after ${attempts * 3} seconds`);
                 break;
             }
             
-            this.logger.info(`Waiting for spinner to disappear... (${spinnerAttempts * 3}s elapsed)`);
+            this.logger.debug(`Waiting for spinner... (${attempts * 3}s elapsed)`);
             await page.waitForTimeout(3000);
         }
-        
-        // Extra wait after spinner disappears for content to render
+
+        // Extra wait after spinner for content to render
         await page.waitForTimeout(3000);
+
+        // YOUR ORIGINAL CODE - Debug info before waiting
+        const debugBefore = await page.evaluate(() => ({
+            hasTable: !!document.querySelector('.customFilterTable'),
+            hasTableScroller: !!document.querySelector('.tableScroller'),
+            hasCustomModalContent: !!document.querySelector('.customModelContent'),
+            tableSelector: '.customFilterTable tbody tr',
+            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
+            spinnerCount: document.querySelectorAll('.slds-spinner').length,
+            spinnerVisible: (() => {
+                const spinner = document.querySelector('.slds-spinner');
+                return spinner ? spinner.offsetParent !== null : false;
+            })(),
+            modalText: document.querySelector('.customModelContent, .tableScroller')?.textContent?.substring(0, 200) || 'No modal text'
+        }));
+
+        this.logger.info('Page state AFTER spinner wait:', debugBefore);
+
+        // Wait for data to load with status updates (YOUR ORIGINAL APPROACH)
+        this.logger.info('Waiting for data to load with status updates...');
         
-        // Now check for the table - it should be there after spinner is gone
-        this.logger.info('Spinner gone, checking for property table...');
-        
-        let tableFound = false;
-        let tableAttempts = 0;
-        const maxTableAttempts = 10; // 30 seconds for table after spinner
-        
-        while (!tableFound && tableAttempts < maxTableAttempts) {
-            tableAttempts++;
+        for (let i = 0; i < 10; i++) {  // Check every 5 seconds for 50 seconds total
+            await page.waitForTimeout(5000);
             
-            const tableInfo = await page.evaluate(() => {
-                // Look for the table in various ways
-                const customTable = document.querySelector('.customFilterTable');
-                const sldsTable = document.querySelector('.slds-table');
-                const anyTable = document.querySelector('table');
-                const tableScroller = document.querySelector('.tableScroller');
-                const modalContent = document.querySelector('.customModelContent, .slds-modal__content');
-                
-                // Check for rows
-                const sldsRows = document.querySelectorAll('tr.slds-hint-parent').length;
-                const anyRows = document.querySelectorAll('tbody tr').length;
-                
-                return {
-                    hasCustomFilterTable: !!customTable,
-                    hasSLDSTable: !!sldsTable,
-                    hasAnyTable: !!anyTable,
-                    hasTableScroller: !!tableScroller,
-                    hasModalContent: !!modalContent,
-                    sldsRowCount: sldsRows,
-                    anyRowCount: anyRows,
-                    // Get some content to debug
-                    modalText: modalContent ? modalContent.textContent.substring(0, 100) : 'No modal content'
-                };
-            });
+            const status = await page.evaluate(() => ({
+                rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
+                sldsRows: document.querySelectorAll('tr.slds-hint-parent').length,
+                anyTableRows: document.querySelectorAll('tbody tr').length,
+                spinnerVisible: (() => {
+                    const spinner = document.querySelector('.slds-spinner');
+                    return spinner ? spinner.offsetParent !== null : false;
+                })()
+            }));
             
-            this.logger.debug(`Table check attempt ${tableAttempts}:`, tableInfo);
+            this.logger.info(`Check ${i + 1}/10: customFilterTable rows=${status.rowCount}, slds-hint-parent=${status.sldsRows}, any tbody rows=${status.anyTableRows}, Spinner=${status.spinnerVisible}`);
             
-            if (tableInfo.hasAnyTable || tableInfo.sldsRowCount > 0 || tableInfo.anyRowCount > 0) {
-                this.logger.info('✅ Table found!', tableInfo);
-                tableFound = true;
+            // If we have rows and no spinner, we're done!
+            if ((status.rowCount > 0 || status.sldsRows > 0 || status.anyTableRows > 0) && !status.spinnerVisible) {
+                this.logger.info(`✅ Data loaded after ${(i + 1) * 5} seconds`);
                 break;
             }
-            
-            await page.waitForTimeout(3000);
         }
-        
-        if (!tableFound) {
+
+        // Final verification (YOUR ORIGINAL CODE)
+        const finalStatus = await page.evaluate(() => ({
+            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
+            sldsRowCount: document.querySelectorAll('tr.slds-hint-parent').length,
+            hasTable: !!document.querySelector('.customFilterTable'),
+            tableBody: !!document.querySelector('.customFilterTable tbody'),
+            allTbodyRows: document.querySelectorAll('tbody tr').length,
+            spinnerVisible: (() => {
+                const spinner = document.querySelector('.slds-spinner');
+                return spinner ? spinner.offsetParent !== null : false;
+            })()
+        }));
+
+        this.logger.info('Final page state:', finalStatus);
+
+        if (finalStatus.rowCount === 0 && finalStatus.sldsRowCount === 0 && finalStatus.allTbodyRows === 0) {
             // Take a screenshot for debugging
-            await page.screenshot({ path: './debug_no_table_after_spinner.png', fullPage: false });
-            
-            const finalDebug = await page.evaluate(() => {
-                return {
-                    bodyText: document.body.textContent?.substring(0, 500),
-                    hasAnyModal: !!document.querySelector('[class*="modal"]'),
-                    allTables: document.querySelectorAll('table').length,
-                    allDivs: document.querySelectorAll('div').length
-                };
-            });
-            
-            this.logger.error('Table never appeared after spinner', finalDebug);
-            throw new Error('Table never loaded after spinner disappeared');
-        }
-        
-        // Wait for rows to populate
-        this.logger.info('Table exists, waiting for property rows...');
-        
-        let rowCount = 0;
-        let rowAttempts = 0;
-        const maxRowAttempts = 10;
-        
-        while (rowCount === 0 && rowAttempts < maxRowAttempts) {
-            rowAttempts++;
-            
-            rowCount = await page.evaluate(() => {
-                // Count data rows
-                const sldsRows = document.querySelectorAll('tr.slds-hint-parent');
-                if (sldsRows.length > 0) return sldsRows.length;
-                
-                // Fallback: any tbody rows with td cells
-                const tbodyRows = document.querySelectorAll('tbody tr');
-                const dataRows = Array.from(tbodyRows).filter(row => row.querySelector('td'));
-                return dataRows.length;
-            });
-            
-            if (rowCount > 0) {
-                this.logger.info(`✅ Found ${rowCount} property rows`);
-                break;
+            try {
+                await page.screenshot({ path: './debug_no_rows.png', fullPage: false });
+                this.logger.info('Debug screenshot saved to debug_no_rows.png');
+            } catch (screenshotError) {
+                this.logger.debug('Could not save screenshot');
             }
             
-            this.logger.debug(`Waiting for rows... attempt ${rowAttempts}`);
-            await page.waitForTimeout(3000);
+            throw new Error(`No table rows found. Table exists: ${finalStatus.hasTable}, All tbody rows: ${finalStatus.allTbodyRows}`);
         }
-        
-        if (rowCount === 0) {
-            throw new Error('No property rows found in table');
-        }
-        
-        this.logger.info(`✅ Property modal fully loaded with ${rowCount} properties`);
+
+        const totalRows = finalStatus.rowCount || finalStatus.sldsRowCount || finalStatus.allTbodyRows;
+        this.logger.info(`✅ Property modal opened with ${totalRows} rows loaded`);
         return true;
 
     } catch (error) {
         this.logger.error('Failed to open property modal', { error: error.message });
-        
-        // Take a screenshot for debugging
-        await page.screenshot({ path: './debug_modal_error_final.png', fullPage: false });
-        
         throw error;
     }
 }
 
 /**
- * Extract property data from the table (unchanged, works fine)
+ * Extract property data - keep your original approach
  */
 async extractPropertyData(page) {
     try {
@@ -1045,13 +1012,16 @@ async extractPropertyData(page) {
         const properties = await page.evaluate(() => {
             const extractedProperties = [];
             
-            // Get all data rows - try multiple selectors
+            // Try multiple selectors for rows
             let rows = document.querySelectorAll('tr.slds-hint-parent');
+            if (rows.length === 0) {
+                rows = document.querySelectorAll('.customFilterTable tbody tr');
+            }
             if (rows.length === 0) {
                 rows = document.querySelectorAll('tbody tr');
             }
             
-            console.log(`Extracting from ${rows.length} rows`);
+            console.log(`Found ${rows.length} rows to extract`);
             
             rows.forEach((row, index) => {
                 try {
