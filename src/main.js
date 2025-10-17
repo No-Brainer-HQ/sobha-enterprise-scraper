@@ -910,28 +910,51 @@ async openPropertyModal(page) {
         }
 
         // Wait for YOUR EXACT spinner selector to disappear
-        this.logger.info('Waiting for Lightning spinner to disappear...');
+        this.logger.info('Waiting for Lightning spinner to disappear (up to 60 seconds)...');
         const spinnerSelector = 'c-broker-portal-unit-filter-component lightning-spinner';
+        
+        // First, wait for spinner to appear (it might take time to show up)
+        try {
+            await page.waitForSelector(spinnerSelector, { 
+                timeout: 5000, 
+                state: 'attached' 
+            });
+            this.logger.info('Spinner detected, waiting for it to disappear...');
+        } catch (e) {
+            this.logger.info('No spinner detected initially, checking if data is already loaded...');
+        }
         
         let spinnerGone = false;
         let attempts = 0;
-        const maxAttempts = 30;
+        const maxAttempts = 60;  // 60 attempts * 1 second = 60 seconds
         
         while (!spinnerGone && attempts < maxAttempts) {
             attempts++;
             
             spinnerGone = await page.evaluate((selector) => {
                 const spinner = document.querySelector(selector);
-                return !spinner || spinner.offsetParent === null;
+                // Also check if table data is already loaded
+                const modalContent = document.querySelector('[id^="modal-content-id-"]');
+                const hasData = modalContent && modalContent.querySelector('table tbody tr');
+                
+                // Spinner is gone if it doesn't exist OR if data is loaded
+                return !spinner || spinner.offsetParent === null || hasData;
             }, spinnerSelector);
             
             if (spinnerGone) {
-                this.logger.info(`✅ Spinner disappeared after ${attempts * 2} seconds`);
+                this.logger.info(`✅ Spinner disappeared/data loaded after ${attempts} seconds`);
                 break;
             }
             
-            this.logger.debug(`Waiting for spinner... (${attempts * 2}s elapsed)`);
-            await page.waitForTimeout(2000);
+            if (attempts % 10 === 0) {
+                this.logger.info(`Still waiting for spinner... (${attempts}s elapsed)`);
+            }
+            
+            await page.waitForTimeout(1000);  // Check every 1 second instead of 2
+        }
+        
+        if (!spinnerGone) {
+            this.logger.warn('Spinner wait timeout after 60 seconds, proceeding anyway...');
         }
 
         // Extra wait for content to render
@@ -1036,6 +1059,100 @@ async openPropertyModal(page) {
         // Take screenshot on error
         await page.screenshot({ path: './error_modal_state.png', fullPage: false });
         throw error;
+    }
+}
+
+/**
+ * Extract property data using exact selectors
+ */
+async extractPropertyData(page) {
+    try {
+        this.logger.info('Starting property data extraction with exact selectors');
+
+        await page.waitForTimeout(2000);
+
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            
+            // Find the modal content div with dynamic ID
+            const modalContent = document.querySelector('[id^="modal-content-id-"]');
+            if (!modalContent) {
+                console.error('Modal content not found');
+                return [];
+            }
+            
+            // Get the tbody
+            const tbody = modalContent.querySelector('table tbody');
+            if (!tbody) {
+                console.error('Table tbody not found');
+                return [];
+            }
+            
+            // Get all rows
+            const rows = tbody.querySelectorAll('tr');
+            console.log(`Found ${rows.length} rows to extract`);
+            
+            rows.forEach((row, index) => {
+                try {
+                    const cells = row.querySelectorAll('td');
+                    
+                    if (cells.length >= 7) {
+                        const getCellText = (cell) => {
+                            // Try to get text from div.slds-truncate first
+                            const truncateDiv = cell.querySelector('div.slds-truncate');
+                            if (truncateDiv) {
+                                return truncateDiv.getAttribute('title') || truncateDiv.textContent?.trim() || '';
+                            }
+                            // Otherwise get direct text
+                            return cell.textContent?.trim() || '';
+                        };
+                        
+                        // Look for action button
+                        const button = cells[cells.length - 1]?.querySelector('button') || 
+                                     cells[7]?.querySelector('button');
+                        
+                        const property = {
+                            rowIndex: index + 1,
+                            projectCategory: getCellText(cells[0]),
+                            project: getCellText(cells[1]),
+                            unitType: getCellText(cells[2]),
+                            floor: getCellText(cells[3]),
+                            unitNo: getCellText(cells[4]),
+                            totalUnitArea: getCellText(cells[5]),
+                            startingPrice: getCellText(cells[6]),
+                            recordId: button?.getAttribute('name') || button?.getAttribute('data-id') || '',
+                            // Parsed values
+                            floorNumber: parseInt(getCellText(cells[3])) || null,
+                            area: parseFloat(getCellText(cells[5])?.replace(/[^0-9.]/g, '')) || null,
+                            price: parseFloat(getCellText(cells[6])?.replace(/[^0-9.]/g, '')) || null
+                        };
+                        
+                        // Only add if we have some data
+                        if (property.unitNo || property.project) {
+                            extractedProperties.push(property);
+                        }
+                    }
+                } catch (rowError) {
+                    console.error(`Error extracting row ${index}:`, rowError.message);
+                }
+            });
+            
+            return extractedProperties;
+        });
+
+        this.logger.info(`✅ Extracted ${properties.length} properties`);
+        this.metrics.recordPropertiesScraped(properties.length);
+
+        // Limit to maxResults if needed
+        if (this.input.maxResults && properties.length > this.input.maxResults) {
+            return properties.slice(0, this.input.maxResults);
+        }
+
+        return properties;
+
+    } catch (error) {
+        this.logger.error('Failed to extract property data', { error: error.message });
+        return [];
     }
 }
 
