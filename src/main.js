@@ -935,7 +935,7 @@ async openPropertyModal(page) {
         // Debug - see what we found
         const tableInfo = await page.evaluate(() => {
             // Find modal content div with dynamic ID
-            const modalContent = document.querySelector('[id^="modal-content-id-"]');
+            const modalContent = document.querySelector('[id^="modal-content-id-1-13281"]');
             const table = modalContent ? modalContent.querySelector('table') : null;
             const tbody = table ? table.querySelector('tbody') : null;
             const rows = tbody ? tbody.querySelectorAll('tr') : [];
