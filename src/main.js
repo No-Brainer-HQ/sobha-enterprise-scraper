@@ -831,8 +831,8 @@ class EnterpriseSobhaPortalScraper {
     }
 
 /**
- * RESTORED VERSION: Using your ORIGINAL working modal detection
- * Only adding spinner handling to fix the actual issue
+ * ENHANCED DEBUGGING VERSION: Finding why table isn't detected
+ * Replace your existing openPropertyModal function with this one
  */
 async openPropertyModal(page) {
     try {
@@ -921,22 +921,79 @@ async openPropertyModal(page) {
         // Extra wait after spinner for content to render
         await page.waitForTimeout(3000);
 
-        // YOUR ORIGINAL CODE - Debug info before waiting
-        const debugBefore = await page.evaluate(() => ({
-            hasTable: !!document.querySelector('.customFilterTable'),
-            hasTableScroller: !!document.querySelector('.tableScroller'),
-            hasCustomModalContent: !!document.querySelector('.customModelContent'),
-            tableSelector: '.customFilterTable tbody tr',
-            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
-            spinnerCount: document.querySelectorAll('.slds-spinner').length,
-            spinnerVisible: (() => {
-                const spinner = document.querySelector('.slds-spinner');
-                return spinner ? spinner.offsetParent !== null : false;
-            })(),
-            modalText: document.querySelector('.customModelContent, .tableScroller')?.textContent?.substring(0, 200) || 'No modal text'
-        }));
+        // ENHANCED DEBUGGING - Let's see what's REALLY there
+        const debugBefore = await page.evaluate(() => {
+            // Try ALL possible table selectors
+            const tableSelectors = [
+                '.customFilterTable',
+                'table.customFilterTable',
+                'table[lwc-774enseH4rp]',
+                'table.slds-table',
+                'table[aria-label*="table"]',
+                'table[aria-label*="Example"]',
+                '[class*="customFilterTable"]',
+                'section[role="dialog"] table',
+                '.slds-modal table',
+                '.slds-modal__container table',
+                '.slds-modal__content table',
+                '.tableScroller table',
+                'table'
+            ];
+            
+            const foundTables = [];
+            for (const selector of tableSelectors) {
+                const table = document.querySelector(selector);
+                if (table) {
+                    foundTables.push({
+                        selector,
+                        classes: table.className,
+                        hasRows: table.querySelectorAll('tr').length
+                    });
+                }
+            }
+            
+            // Check for rows with different selectors
+            const rowSelectors = [
+                'tr.slds-hint-parent',
+                'tr[lwc-774enseH4rp]',
+                'tbody tr[lwc-774enseH4rp]',
+                'tbody tr',
+                '.customFilterTable tbody tr',
+                'table tbody tr'
+            ];
+            
+            const rowCounts = {};
+            for (const selector of rowSelectors) {
+                rowCounts[selector] = document.querySelectorAll(selector).length;
+            }
+            
+            // Check modal structure
+            const modalInfo = {
+                hasSection: !!document.querySelector('section[role="dialog"]'),
+                hasModalContainer: !!document.querySelector('.slds-modal__container'),
+                hasModalContent: !!document.querySelector('.slds-modal__content'),
+                modalClasses: document.querySelector('section[role="dialog"]')?.className || 'No modal found'
+            };
+            
+            // Get actual HTML structure (first 1000 chars)
+            const modalHTML = document.querySelector('.slds-modal__content')?.innerHTML?.substring(0, 1000) || 
+                             document.querySelector('[role="dialog"]')?.innerHTML?.substring(0, 1000) || 
+                             'No modal content';
+            
+            return {
+                foundTables,
+                totalTablesOnPage: document.querySelectorAll('table').length,
+                rowCounts,
+                modalInfo,
+                modalHTML,
+                spinnerVisible: (() => {
+                    const spinner = document.querySelector('.slds-spinner');
+                    return spinner ? spinner.offsetParent !== null : false;
+                })()
+            };
+        });
 
-        this.logger.info('Page state AFTER spinner wait:', debugBefore);
+        this.logger.info('ENHANCED DEBUG - Tables and Modal State:', JSON.stringify(debugBefore, null, 2));
 
         // Wait for data to load with status updates (YOUR ORIGINAL APPROACH)
         this.logger.info('Waiting for data to load with status updates...');
@@ -944,41 +1001,102 @@ async openPropertyModal(page) {
         for (let i = 0; i < 10; i++) {  // Check every 5 seconds for 50 seconds total
             await page.waitForTimeout(5000);
             
-            const status = await page.evaluate(() => ({
-                rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
-                sldsRows: document.querySelectorAll('tr.slds-hint-parent').length,
-                anyTableRows: document.querySelectorAll('tbody tr').length,
-                spinnerVisible: (() => {
-                    const spinner = document.querySelector('.slds-spinner');
-                    return spinner ? spinner.offsetParent !== null : false;
-                })()
-            }));
+            const status = await page.evaluate(() => {
+                // Try multiple row selectors
+                const selectors = [
+                    'tr.slds-hint-parent',
+                    'tr[lwc-774enseH4rp]',
+                    'tbody tr[lwc-774enseH4rp]',
+                    '.customFilterTable tbody tr',
+                    'tbody tr',
+                    'table tbody tr'
+                ];
+                
+                const counts = {};
+                let maxCount = 0;
+                for (const sel of selectors) {
+                    const count = document.querySelectorAll(sel).length;
+                    counts[sel] = count;
+                    maxCount = Math.max(maxCount, count);
+                }
+                
+                const spinner = document.querySelector('.slds-spinner');
+                
+                return {
+                    rowCounts: counts,
+                    maxRows: maxCount,
+                    spinnerVisible: spinner ? spinner.offsetParent !== null : false,
+                    hasAnyTable: document.querySelectorAll('table').length > 0,
+                    hasLWCElements: document.querySelectorAll('[lwc-774enseH4rp]').length > 0
+                };
+            });
             
-            this.logger.info(`Check ${i + 1}/10: customFilterTable rows=${status.rowCount}, slds-hint-parent=${status.sldsRows}, any tbody rows=${status.anyTableRows}, Spinner=${status.spinnerVisible}`);
+            this.logger.info(`Check ${i + 1}/10:`, JSON.stringify(status));
             
-            // If we have rows and no spinner, we're done!
-            if ((status.rowCount > 0 || status.sldsRows > 0 || status.anyTableRows > 0) && !status.spinnerVisible) {
-                this.logger.info(`✅ Data loaded after ${(i + 1) * 5} seconds`);
+            if (status.maxRows > 0 && !status.spinnerVisible) {
+                this.logger.info(`✅ Data loaded after ${(i + 1) * 5} seconds with ${status.maxRows} rows`);
                 break;
             }
         }
 
-        // Final verification (YOUR ORIGINAL CODE)
-        const finalStatus = await page.evaluate(() => ({
-            rowCount: document.querySelectorAll('.customFilterTable tbody tr').length,
-            sldsRowCount: document.querySelectorAll('tr.slds-hint-parent').length,
-            hasTable: !!document.querySelector('.customFilterTable'),
-            tableBody: !!document.querySelector('.customFilterTable tbody'),
-            allTbodyRows: document.querySelectorAll('tbody tr').length,
-            spinnerVisible: (() => {
-                const spinner = document.querySelector('.slds-spinner');
-                return spinner ? spinner.offsetParent !== null : false;
-            })()
-        }));
+        // ENHANCED Final verification
+        const finalStatus = await page.evaluate(() => {
+            // Find ANY table on the page
+            const allTables = document.querySelectorAll('table');
+            const tableInfo = [];
+            
+            for (let i = 0; i < allTables.length; i++) {
+                const table = allTables[i];
+                tableInfo.push({
+                    index: i,
+                    classes: table.className,
+                    id: table.id,
+                    ariaLabel: table.getAttribute('aria-label'),
+                    rowCount: table.querySelectorAll('tr').length,
+                    visible: table.offsetParent !== null
+                });
+            }
+            
+            // Try all row selectors
+            const rowSelectors = [
+                'tr.slds-hint-parent',
+                'tr[lwc-774enseH4rp]',
+                'tbody tr[lwc-774enseH4rp]',
+                'tbody tr',
+                '.customFilterTable tbody tr',
+                'table tbody tr'
+            ];
+            
+            const rowCounts = {};
+            let maxRows = 0;
+            for (const selector of rowSelectors) {
+                const rows = document.querySelectorAll(selector);
+                rowCounts[selector] = rows.length;
+                maxRows = Math.max(maxRows, rows.length);
+            }
+            
+            // Check Lightning Web Component elements
+            const lwcElements = document.querySelectorAll('[lwc-774enseH4rp]');
+            
+            return {
+                allTablesFound: tableInfo,
+                totalTablesOnPage: allTables.length,
+                rowCounts,
+                maxRowsFound: maxRows,
+                lwcElementCount: lwcElements.length,
+                hasCustomFilterTable: !!document.querySelector('.customFilterTable'),
+                hasTableScroller: !!document.querySelector('.tableScroller'),
+                modalVisible: !!document.querySelector('section[role="dialog"]'),
+                spinnerVisible: (() => {
+                    const spinner = document.querySelector('.slds-spinner');
+                    return spinner ? spinner.offsetParent !== null : false;
+                })()
+            };
+        });
 
-        this.logger.info('Final page state:', finalStatus);
+        this.logger.info('FINAL ENHANCED DEBUG:', JSON.stringify(finalStatus, null, 2));
 
-        if (finalStatus.rowCount === 0 && finalStatus.sldsRowCount === 0 && finalStatus.allTbodyRows === 0) {
+        if (finalStatus.maxRowsFound === 0) {
             // Take a screenshot for debugging
             try {
                 await page.screenshot({ path: './debug_no_rows.png', fullPage: false });
@@ -987,11 +1105,10 @@ async openPropertyModal(page) {
                 this.logger.debug('Could not save screenshot');
             }
             
-            throw new Error(`No table rows found. Table exists: ${finalStatus.hasTable}, All tbody rows: ${finalStatus.allTbodyRows}`);
+            throw new Error(`No table rows found. Tables on page: ${finalStatus.totalTablesOnPage}, Modal visible: ${finalStatus.modalVisible}, LWC elements: ${finalStatus.lwcElementCount}`);
         }
 
-        const totalRows = finalStatus.rowCount || finalStatus.sldsRowCount || finalStatus.allTbodyRows;
-        this.logger.info(`✅ Property modal opened with ${totalRows} rows loaded`);
+        this.logger.info(`✅ Property modal opened with ${finalStatus.maxRowsFound} rows loaded`);
         return true;
 
     } catch (error) {
