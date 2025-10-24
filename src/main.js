@@ -837,114 +837,226 @@ class EnterpriseSobhaPortalScraper {
  */
 
 /**
- * WORKING FIX - Corrected selector syntax
- * Replace your openPropertyModal function with this
+ * FINAL WORKING SOLUTION - Handles the 10-20 second loading time
+ * Based on actual screenshots showing the modal behavior
  */
+
 async openPropertyModal(page) {
     try {
-        this.logger.info('Opening property modal - FIXED VERSION');
+        this.logger.info('Opening property modal with proper wait times');
 
         await page.waitForTimeout(3000);
 
-        // Use Playwright's built-in selector methods (not inside evaluate)
-        this.logger.info('Looking for Filter Properties button');
+        // Step 1: Click Filter Properties - this works!
+        this.logger.info('Clicking Filter Properties button');
+        await page.click('a:has-text("Filter Properties")');
+        this.logger.info('✅ Filter Properties clicked');
+
+        // Step 2: Wait for modal to appear (it appears blank first)
+        this.logger.info('Waiting for modal to appear (blank state)');
+        await page.waitForTimeout(3000);
+
+        // Step 3: Wait for spinner to appear and then disappear (10-20 seconds)
+        this.logger.info('Waiting for data to load (this takes 10-20 seconds)...');
         
-        // Method 1: Try with Playwright's text selector
-        try {
-            await page.click('a:has-text("Filter Properties")', { timeout: 5000 });
-            this.logger.info('Clicked Filter Properties link');
-        } catch (e) {
-            // Method 2: Try button if link fails
+        // Check for spinner
+        const spinnerVisible = await page.isVisible('lightning-spinner, .slds-spinner').catch(() => false);
+        if (spinnerVisible) {
+            this.logger.info('Spinner detected, waiting for it to disappear...');
+            
+            // Wait up to 30 seconds for spinner to disappear
+            await page.waitForSelector('lightning-spinner, .slds-spinner', { 
+                state: 'hidden', 
+                timeout: 30000 
+            }).catch(() => {
+                this.logger.warn('Spinner wait timeout, continuing anyway');
+            });
+            
+            this.logger.info('Spinner disappeared');
+        }
+        
+        // Step 4: Additional wait for table to render after spinner
+        this.logger.info('Waiting for table data to render...');
+        await page.waitForTimeout(5000);
+        
+        // Step 5: Look for the table data
+        this.logger.info('Checking for table data...');
+        
+        // Try multiple table selectors
+        const tableSelectors = [
+            'table tbody tr',
+            '.slds-table tbody tr',
+            '[role="dialog"] table tbody tr',
+            'section[role="dialog"] table tbody tr'
+        ];
+        
+        let tableFound = false;
+        for (const selector of tableSelectors) {
             try {
-                await page.click('button:has-text("Filter Properties")', { timeout: 5000 });
-                this.logger.info('Clicked Filter Properties button');
-            } catch (e2) {
-                // Method 3: Click by data-element attribute
-                try {
-                    await page.click('a[data-element="general-enquiry"]', { timeout: 5000 });
-                    this.logger.info('Clicked by data-element attribute');
-                } catch (e3) {
-                    throw new Error('Could not find Filter Properties button/link');
-                }
+                await page.waitForSelector(selector, { timeout: 5000 });
+                tableFound = true;
+                this.logger.info(`✅ Table found with selector: ${selector}`);
+                break;
+            } catch (e) {
+                this.logger.debug(`Table not found with: ${selector}`);
             }
         }
-
-        // Wait for modal to appear
-        this.logger.info('Waiting for modal to appear');
-        await page.waitForTimeout(5000);
-
-        // Check what appeared after clicking
-        const modalInfo = await page.evaluate(() => {
-            const info = {
-                hasFilterComponent: !!document.querySelector('c-broker-portal-unit-filter-component'),
-                hasSectionDialog: !!document.querySelector('section[role="dialog"]'),
-                hasModal: !!document.querySelector('.slds-modal'),
-                tableCount: document.querySelectorAll('table').length,
-                spinnerCount: document.querySelectorAll('lightning-spinner').length
-            };
+        
+        // Step 6: Verify data loaded
+        const dataCheck = await page.evaluate(() => {
+            const tables = document.querySelectorAll('table');
+            const results = [];
             
-            // Get all tables info
-            const tables = [];
-            document.querySelectorAll('table').forEach((table, index) => {
+            tables.forEach((table, index) => {
                 const tbody = table.querySelector('tbody');
                 const rows = tbody ? tbody.querySelectorAll('tr') : [];
-                tables.push({
-                    index,
-                    hasRows: rows.length > 0,
-                    rowCount: rows.length
-                });
-            });
-            info.tables = tables;
-            
-            return info;
-        });
-
-        this.logger.info('Modal state after click:', modalInfo);
-
-        // If modal opened but no data, we need to trigger a search
-        if (modalInfo.hasFilterComponent && modalInfo.tableCount === 0) {
-            this.logger.info('Modal opened but no data, looking for search trigger');
-            
-            // Look for any button to trigger search
-            const buttons = await page.$$('c-broker-portal-unit-filter-component button');
-            this.logger.info(`Found ${buttons.length} buttons in filter component`);
-            
-            // Click the first non-close button
-            for (const button of buttons) {
-                const text = await button.textContent();
-                if (text && !text.toLowerCase().includes('close') && !text.toLowerCase().includes('cancel')) {
-                    await button.click();
-                    this.logger.info(`Clicked button: ${text}`);
-                    break;
+                
+                if (rows.length > 0) {
+                    // Check if this looks like property data (has multiple cells)
+                    const firstRow = rows[0];
+                    const cells = firstRow.querySelectorAll('td');
+                    
+                    if (cells.length >= 7) { // Property table has 7+ columns
+                        results.push({
+                            tableIndex: index,
+                            rowCount: rows.length,
+                            cellCount: cells.length,
+                            isPropertyTable: true
+                        });
+                    }
                 }
-            }
-            
-            // Wait for data to load
-            await page.waitForTimeout(10000);
-        }
-
-        // Final check
-        const finalCheck = await page.evaluate(() => {
-            const tables = document.querySelectorAll('table');
-            let totalRows = 0;
-            tables.forEach(table => {
-                const rows = table.querySelectorAll('tbody tr');
-                totalRows += rows.length;
             });
-            return { tableCount: tables.length, totalRows };
+            
+            return results;
         });
-
-        this.logger.info('Final state:', finalCheck);
         
-        if (finalCheck.totalRows === 0) {
-            throw new Error('No data rows found after opening modal');
+        this.logger.info('Table data check:', dataCheck);
+        
+        if (dataCheck.length === 0 || !dataCheck.some(t => t.isPropertyTable)) {
+            // One more wait and retry
+            this.logger.warn('No property table found, waiting longer...');
+            await page.waitForTimeout(10000);
+            
+            // Final check
+            const finalRowCount = await page.evaluate(() => {
+                const rows = document.querySelectorAll('table tbody tr');
+                return rows.length;
+            });
+            
+            if (finalRowCount === 0) {
+                throw new Error('No property data loaded after extended wait');
+            }
         }
-
+        
+        this.logger.info('✅ Property modal opened successfully with data');
         return true;
 
     } catch (error) {
         this.logger.error('Failed to open property modal', { error: error.message });
+        
+        // Take screenshot for debugging
+        await page.screenshot({ path: './modal_error.png', fullPage: false });
         throw error;
+    }
+}
+
+/**
+ * Extract property data - matching the structure from screenshot
+ * Columns: Project, Sub Project, Unit Type, Floor, Unit No., Total Unit Area, Starting Price
+ */
+async extractPropertyData(page) {
+    try {
+        this.logger.info('Extracting property data from modal');
+
+        // Give table a moment to stabilize
+        await page.waitForTimeout(2000);
+
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            
+            // Find all tables and process the one with property data
+            const tables = document.querySelectorAll('table');
+            
+            for (const table of tables) {
+                const tbody = table.querySelector('tbody');
+                if (!tbody) continue;
+                
+                const rows = tbody.querySelectorAll('tr');
+                if (rows.length === 0) continue;
+                
+                // Check if this is the property table (has 7+ columns)
+                const firstRow = rows[0];
+                const testCells = firstRow.querySelectorAll('td');
+                if (testCells.length < 7) continue;
+                
+                console.log(`Processing property table with ${rows.length} rows`);
+                
+                rows.forEach((row, index) => {
+                    try {
+                        const cells = row.querySelectorAll('td');
+                        
+                        if (cells.length >= 7) {
+                            const getCellText = (cell) => {
+                                // Remove any extra whitespace and return clean text
+                                return cell.textContent?.trim() || '';
+                            };
+                            
+                            const property = {
+                                rowIndex: index + 1,
+                                // Based on the screenshot columns:
+                                project: getCellText(cells[0]),        // e.g., "Sobha Hartland"
+                                subProject: getCellText(cells[1]),     // e.g., "Creek Vista"
+                                unitType: getCellText(cells[2]),       // e.g., "Type A"
+                                floor: getCellText(cells[3]),          // e.g., "18"
+                                unitNo: getCellText(cells[4]),         // e.g., "A-1813"
+                                totalUnitArea: getCellText(cells[5]),  // e.g., "788.46"
+                                startingPrice: getCellText(cells[6]),  // e.g., "1,360,434"
+                                
+                                // Parse numeric values
+                                floorNumber: parseInt(getCellText(cells[3])) || null,
+                                area: parseFloat(getCellText(cells[5])?.replace(/,/g, '')) || null,
+                                price: parseFloat(getCellText(cells[6])?.replace(/,/g, '')) || null
+                            };
+                            
+                            // Validate we have meaningful data
+                            if (property.unitNo && property.project) {
+                                extractedProperties.push(property);
+                                
+                                // Log first few for verification
+                                if (index < 3) {
+                                    console.log(`Property ${index + 1}: ${property.project} - ${property.unitNo} - ${property.startingPrice}`);
+                                }
+                            }
+                        }
+                    } catch (rowError) {
+                        console.error(`Error extracting row ${index}:`, rowError.message);
+                    }
+                });
+                
+                // If we found properties, stop looking
+                if (extractedProperties.length > 0) break;
+            }
+            
+            return extractedProperties;
+        });
+
+        this.logger.info(`✅ Extracted ${properties.length} properties`);
+        
+        if (properties.length > 0) {
+            // Log sample data
+            this.logger.info('Sample extracted properties:', {
+                total: properties.length,
+                first: properties[0],
+                second: properties[1] || null
+            });
+        }
+
+        this.metrics.recordPropertiesScraped(properties.length);
+        return properties;
+
+    } catch (error) {
+        this.logger.error('Failed to extract property data', { error: error.message });
+        return [];
     }
 }
 /**
