@@ -1063,13 +1063,15 @@ async openPropertyModal(page) {
 }
 
 /**
- * Extract property data using exact selectors
+ * Fixed extraction function for Lightning table data
+ * This replaces all the duplicate extractPropertyData functions in your code
  */
 async extractPropertyData(page) {
     try {
-        this.logger.info('Starting property data extraction with exact selectors');
+        this.logger.info('Starting property data extraction with Lightning table selectors');
 
-        await page.waitForTimeout(2000);
+        // Wait for table to stabilize
+        await page.waitForTimeout(3000);
 
         const properties = await page.evaluate(() => {
             const extractedProperties = [];
@@ -1081,265 +1083,162 @@ async extractPropertyData(page) {
                 return [];
             }
             
-            // Get the tbody
-            const tbody = modalContent.querySelector('table tbody');
+            // Get the tbody - it has lwc attributes
+            const tbody = modalContent.querySelector('tbody[lwc-774enseH4rp], table tbody');
             if (!tbody) {
                 console.error('Table tbody not found');
                 return [];
             }
             
-            // Get all rows
-            const rows = tbody.querySelectorAll('tr');
+            // Get all rows with the specific class
+            const rows = tbody.querySelectorAll('tr.slds-hint-parent, tr[lwc-774enseH4rp]');
             console.log(`Found ${rows.length} rows to extract`);
             
             rows.forEach((row, index) => {
                 try {
+                    // Get all cells in this row
                     const cells = row.querySelectorAll('td');
                     
                     if (cells.length >= 7) {
                         const getCellText = (cell) => {
-                            // Try to get text from div.slds-truncate first
+                            // First try to get the title attribute from slds-truncate div
                             const truncateDiv = cell.querySelector('div.slds-truncate');
                             if (truncateDiv) {
-                                return truncateDiv.getAttribute('title') || truncateDiv.textContent?.trim() || '';
+                                // Title attribute has the full text without truncation
+                                const title = truncateDiv.getAttribute('title');
+                                if (title) return title.trim();
+                                // Fallback to text content
+                                return truncateDiv.textContent?.trim() || '';
                             }
-                            // Otherwise get direct text
+                            // Direct text from cell as last resort
                             return cell.textContent?.trim() || '';
                         };
                         
-                        // Look for action button
-                        const button = cells[cells.length - 1]?.querySelector('button') || 
-                                     cells[7]?.querySelector('button');
+                        // Map cells based on data-label attributes for verification
+                        const cellData = {};
+                        cells.forEach(cell => {
+                            const label = cell.getAttribute('data-label');
+                            if (label) {
+                                cellData[label] = getCellText(cell);
+                            }
+                        });
                         
+                        // Extract based on position (matching your table structure)
+                        // From the HTML: Project Category, Project, Unit Type, Floor, Unit No., Total Unit Area, Starting Price
                         const property = {
                             rowIndex: index + 1,
-                            projectCategory: getCellText(cells[0]),
-                            project: getCellText(cells[1]),
-                            unitType: getCellText(cells[2]),
-                            floor: getCellText(cells[3]),
-                            unitNo: getCellText(cells[4]),
-                            totalUnitArea: getCellText(cells[5]),
-                            startingPrice: getCellText(cells[6]),
-                            recordId: button?.getAttribute('name') || button?.getAttribute('data-id') || '',
-                            // Parsed values
-                            floorNumber: parseInt(getCellText(cells[3])) || null,
-                            area: parseFloat(getCellText(cells[5])?.replace(/[^0-9.]/g, '')) || null,
-                            price: parseFloat(getCellText(cells[6])?.replace(/[^0-9.]/g, '')) || null
+                            projectCategory: cellData['Project'] || getCellText(cells[0]),
+                            project: cellData['Project'] || getCellText(cells[1]), 
+                            unitType: cellData['Unit Type'] || getCellText(cells[2]),
+                            floor: cellData['Floor'] || getCellText(cells[3]),
+                            unitNo: cellData['Unit No.'] || getCellText(cells[4]),
+                            totalUnitArea: cellData['Total Unit Area'] || getCellText(cells[5]),
+                            startingPrice: cellData['Starting Price'] || getCellText(cells[6]),
+                            
+                            // Extract button/action data if available
+                            recordId: '',
+                            
+                            // Parse numeric values
+                            floorNumber: null,
+                            area: null,
+                            price: null
                         };
                         
-                        // Only add if we have some data
-                        if (property.unitNo || property.project) {
-                            extractedProperties.push(property);
+                        // Try to get the action button data
+                        const actionCell = cells[cells.length - 1] || cells[7];
+                        if (actionCell) {
+                            const button = actionCell.querySelector('button, lightning-button');
+                            if (button) {
+                                property.recordId = button.getAttribute('name') || 
+                                                  button.getAttribute('data-id') || 
+                                                  button.getAttribute('data-record-id') || '';
+                            }
                         }
+                        
+                        // Parse numeric values
+                        try {
+                            property.floorNumber = parseInt(property.floor) || null;
+                            property.area = parseFloat(property.totalUnitArea?.replace(/[^0-9.]/g, '')) || null;
+                            property.price = parseFloat(property.startingPrice?.replace(/[^0-9.]/g, '')) || null;
+                        } catch (parseError) {
+                            console.warn(`Failed to parse numeric values for row ${index}:`, parseError);
+                        }
+                        
+                        // Validate that we have essential data
+                        if (property.unitNo || property.project || property.startingPrice) {
+                            extractedProperties.push(property);
+                            console.log(`Extracted property ${index + 1}:`, {
+                                unitNo: property.unitNo,
+                                project: property.project,
+                                price: property.startingPrice
+                            });
+                        } else {
+                            console.warn(`Row ${index + 1} skipped - no essential data found`);
+                        }
+                    } else {
+                        console.warn(`Row ${index + 1} has only ${cells.length} cells, expected at least 7`);
                     }
                 } catch (rowError) {
                     console.error(`Error extracting row ${index}:`, rowError.message);
                 }
             });
             
+            console.log(`Successfully extracted ${extractedProperties.length} properties from ${rows.length} rows`);
             return extractedProperties;
         });
 
         this.logger.info(`✅ Extracted ${properties.length} properties`);
-        this.metrics.recordPropertiesScraped(properties.length);
-
-        // Limit to maxResults if needed
-        if (this.input.maxResults && properties.length > this.input.maxResults) {
-            return properties.slice(0, this.input.maxResults);
-        }
-
-        return properties;
-
-    } catch (error) {
-        this.logger.error('Failed to extract property data', { error: error.message });
-        return [];
-    }
-}
-
-/**
- * Extract property data using exact selectors
- */
-async extractPropertyData(page) {
-    try {
-        this.logger.info('Starting property data extraction with exact selectors');
-
-        await page.waitForTimeout(2000);
-
-        const properties = await page.evaluate(() => {
-            const extractedProperties = [];
-            
-            // Find the modal content div with dynamic ID
-            const modalContent = document.querySelector('[id^="modal-content-id-"]');
-            if (!modalContent) {
-                console.error('Modal content not found');
-                return [];
-            }
-            
-            // Get the tbody
-            const tbody = modalContent.querySelector('table tbody');
-            if (!tbody) {
-                console.error('Table tbody not found');
-                return [];
-            }
-            
-            // Get all rows
-            const rows = tbody.querySelectorAll('tr');
-            console.log(`Found ${rows.length} rows to extract`);
-            
-            rows.forEach((row, index) => {
-                try {
-                    const cells = row.querySelectorAll('td');
-                    
-                    if (cells.length >= 7) {
-                        const getCellText = (cell) => {
-                            // Try to get text from div.slds-truncate first
-                            const truncateDiv = cell.querySelector('div.slds-truncate');
-                            if (truncateDiv) {
-                                return truncateDiv.getAttribute('title') || truncateDiv.textContent?.trim() || '';
-                            }
-                            // Otherwise get direct text
-                            return cell.textContent?.trim() || '';
-                        };
-                        
-                        // Look for action button
-                        const button = cells[cells.length - 1]?.querySelector('button') || 
-                                     cells[7]?.querySelector('button');
-                        
-                        const property = {
-                            rowIndex: index + 1,
-                            projectCategory: getCellText(cells[0]),
-                            project: getCellText(cells[1]),
-                            unitType: getCellText(cells[2]),
-                            floor: getCellText(cells[3]),
-                            unitNo: getCellText(cells[4]),
-                            totalUnitArea: getCellText(cells[5]),
-                            startingPrice: getCellText(cells[6]),
-                            recordId: button?.getAttribute('name') || button?.getAttribute('data-id') || '',
-                            // Parsed values
-                            floorNumber: parseInt(getCellText(cells[3])) || null,
-                            area: parseFloat(getCellText(cells[5])?.replace(/[^0-9.]/g, '')) || null,
-                            price: parseFloat(getCellText(cells[6])?.replace(/[^0-9.]/g, '')) || null
-                        };
-                        
-                        // Only add if we have some data
-                        if (property.unitNo || property.project) {
-                            extractedProperties.push(property);
-                        }
-                    }
-                } catch (rowError) {
-                    console.error(`Error extracting row ${index}:`, rowError.message);
-                }
+        
+        // Log sample of first few properties for verification
+        if (properties.length > 0) {
+            this.logger.info('Sample of extracted properties:', {
+                count: properties.length,
+                firstProperty: properties[0],
+                lastProperty: properties[properties.length - 1]
+            });
+        } else {
+            this.logger.warn('No properties extracted - debugging info:', {
+                modalFound: await page.evaluate(() => !!document.querySelector('[id^="modal-content-id-"]')),
+                tbodyFound: await page.evaluate(() => !!document.querySelector('tbody[lwc-774enseH4rp], tbody')),
+                rowCount: await page.evaluate(() => {
+                    const tbody = document.querySelector('tbody[lwc-774enseH4rp], tbody');
+                    return tbody ? tbody.querySelectorAll('tr.slds-hint-parent').length : 0;
+                }),
+                cellsInFirstRow: await page.evaluate(() => {
+                    const firstRow = document.querySelector('tr.slds-hint-parent');
+                    return firstRow ? firstRow.querySelectorAll('td').length : 0;
+                })
             });
             
-            return extractedProperties;
-        });
-
-        this.logger.info(`✅ Extracted ${properties.length} properties`);
-        this.metrics.recordPropertiesScraped(properties.length);
-
-        // Limit to maxResults if needed
-        if (this.input.maxResults && properties.length > this.input.maxResults) {
-            return properties.slice(0, this.input.maxResults);
-        }
-
-        return properties;
-
-    } catch (error) {
-        this.logger.error('Failed to extract property data', { error: error.message });
-        return [];
-    }
-}    
-
-/**
- * Extract property data using exact selectors
- */
-async extractPropertyData(page) {
-    try {
-        this.logger.info('Starting property data extraction with exact selectors');
-
-        await page.waitForTimeout(2000);
-
-        const properties = await page.evaluate(() => {
-            const extractedProperties = [];
-            
-            // Find the modal content div with dynamic ID
-            const modalContent = document.querySelector('[id^="modal-content-id-"]');
-            if (!modalContent) {
-                console.error('Modal content not found');
-                return [];
-            }
-            
-            // Get the tbody
-            const tbody = modalContent.querySelector('table tbody');
-            if (!tbody) {
-                console.error('Table tbody not found');
-                return [];
-            }
-            
-            // Get all rows
-            const rows = tbody.querySelectorAll('tr');
-            console.log(`Found ${rows.length} rows to extract`);
-            
-            rows.forEach((row, index) => {
-                try {
-                    const cells = row.querySelectorAll('td');
-                    
-                    if (cells.length >= 7) {
-                        const getCellText = (cell) => {
-                            // Try to get text from div.slds-truncate first
-                            const truncateDiv = cell.querySelector('div.slds-truncate');
-                            if (truncateDiv) {
-                                return truncateDiv.getAttribute('title') || truncateDiv.textContent?.trim() || '';
-                            }
-                            // Otherwise get direct text
-                            return cell.textContent?.trim() || '';
-                        };
-                        
-                        // Look for action button
-                        const button = cells[cells.length - 1]?.querySelector('button') || 
-                                     cells[7]?.querySelector('button');
-                        
-                        const property = {
-                            rowIndex: index + 1,
-                            projectCategory: getCellText(cells[0]),
-                            project: getCellText(cells[1]),
-                            unitType: getCellText(cells[2]),
-                            floor: getCellText(cells[3]),
-                            unitNo: getCellText(cells[4]),
-                            totalUnitArea: getCellText(cells[5]),
-                            startingPrice: getCellText(cells[6]),
-                            recordId: button?.getAttribute('name') || button?.getAttribute('data-id') || '',
-                            // Parsed values
-                            floorNumber: parseInt(getCellText(cells[3])) || null,
-                            area: parseFloat(getCellText(cells[5])?.replace(/[^0-9.]/g, '')) || null,
-                            price: parseFloat(getCellText(cells[6])?.replace(/[^0-9.]/g, '')) || null
-                        };
-                        
-                        // Only add if we have some data
-                        if (property.unitNo || property.project) {
-                            extractedProperties.push(property);
-                        }
-                    }
-                } catch (rowError) {
-                    console.error(`Error extracting row ${index}:`, rowError.message);
-                }
+            // Take a screenshot for debugging
+            await page.screenshot({ 
+                path: './debug_extraction_failed.png', 
+                fullPage: false 
             });
-            
-            return extractedProperties;
-        });
+        }
 
-        this.logger.info(`✅ Extracted ${properties.length} properties`);
         this.metrics.recordPropertiesScraped(properties.length);
 
-        // Limit to maxResults if needed
+        // Apply maxResults limit if specified
         if (this.input.maxResults && properties.length > this.input.maxResults) {
+            this.logger.info(`Limiting results to ${this.input.maxResults} properties`);
             return properties.slice(0, this.input.maxResults);
         }
 
         return properties;
 
     } catch (error) {
-        this.logger.error('Failed to extract property data', { error: error.message });
+        this.logger.error('Failed to extract property data', { 
+            error: error.message,
+            stack: error.stack 
+        });
+        
+        // Take error screenshot
+        await page.screenshot({ 
+            path: './error_extraction.png', 
+            fullPage: false 
+        });
+        
         return [];
     }
 }
