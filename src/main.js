@@ -836,253 +836,117 @@ class EnterpriseSobhaPortalScraper {
  * This version will handle the Lightning component lifecycle properly
  */
 
-// Replace your openPropertyModal function with this enhanced version:
-
+/**
+ * WORKING FIX - Corrected selector syntax
+ * Replace your openPropertyModal function with this
+ */
 async openPropertyModal(page) {
     try {
-        this.logger.info('Opening property modal with Lightning component handling');
+        this.logger.info('Opening property modal - FIXED VERSION');
 
-        // Wait for page to stabilize
         await page.waitForTimeout(3000);
 
-        // Step 1: Click Filter Properties button
-        this.logger.info('Clicking Filter Properties button');
+        // Use Playwright's built-in selector methods (not inside evaluate)
+        this.logger.info('Looking for Filter Properties button');
         
-        const buttonClicked = await page.evaluate(() => {
-            const link = document.querySelector('a[data-element="general-enquiry"]') ||
-                        document.querySelector('a:has-text("Filter Properties")');
-            if (link) {
-                link.click();
-                return true;
-            }
-            return false;
-        });
-
-        if (!buttonClicked) {
-            throw new Error('Filter Properties button not found');
-        }
-
-        // Step 2: Wait for the modal component to load
-        this.logger.info('Waiting for Lightning component to initialize');
-        await page.waitForSelector('c-broker-portal-unit-filter-component', { 
-            timeout: 30000 
-        });
-        
-        // Step 3: CRITICAL - Trigger any required filters or actions
-        // Lightning components often need additional triggers to load data
-        this.logger.info('Checking for filter inputs that need to be set');
-        
-        await page.waitForTimeout(3000);
-        
-        // Look for and interact with filter dropdowns
-        const filtersSet = await page.evaluate(() => {
-            const results = [];
-            
-            // Find all Lightning comboboxes (dropdowns)
-            const comboboxes = document.querySelectorAll('lightning-combobox');
-            console.log(`Found ${comboboxes.length} Lightning comboboxes`);
-            
-            comboboxes.forEach((combo, index) => {
-                // Try to find the input element inside
-                const input = combo.querySelector('input');
-                const button = combo.querySelector('button');
-                
-                if (button) {
-                    // Click to open dropdown
-                    button.click();
-                    results.push(`Clicked combobox ${index}`);
-                }
-            });
-            
-            return results;
-        });
-        
-        if (filtersSet.length > 0) {
-            this.logger.info('Interacted with filters:', filtersSet);
-            await page.waitForTimeout(2000);
-        }
-
-        // Step 4: Look for a search/apply button INSIDE the modal
-        this.logger.info('Looking for search/apply button in modal');
-        
-        const searchTriggered = await page.evaluate(() => {
-            // Look specifically in the filter component
-            const filterComponent = document.querySelector('c-broker-portal-unit-filter-component');
-            if (!filterComponent) return false;
-            
-            // Find buttons within the component
-            const buttons = filterComponent.querySelectorAll('button, lightning-button');
-            
-            for (const btn of buttons) {
-                const text = (btn.textContent || '').toLowerCase();
-                // Skip close buttons
-                if (text.includes('close') || text.includes('cancel')) continue;
-                
-                // Look for action buttons
-                if (text.includes('search') || 
-                    text.includes('apply') || 
-                    text.includes('filter') ||
-                    text.includes('load') ||
-                    text.includes('show') ||
-                    text.includes('get')) {
-                    console.log(`Clicking action button: ${text}`);
-                    btn.click();
-                    return true;
-                }
-            }
-            
-            // Also check for any button with primary styling
-            const primaryButtons = filterComponent.querySelectorAll('.slds-button_brand, button[class*="brand"]');
-            if (primaryButtons.length > 0) {
-                console.log('Clicking primary button');
-                primaryButtons[0].click();
-                return true;
-            }
-            
-            return false;
-        });
-        
-        if (searchTriggered) {
-            this.logger.info('Triggered search/filter action');
-            
-            // Wait for spinner to appear and disappear
-            this.logger.info('Waiting for data to load');
-            
-            // Wait for spinner
+        // Method 1: Try with Playwright's text selector
+        try {
+            await page.click('a:has-text("Filter Properties")', { timeout: 5000 });
+            this.logger.info('Clicked Filter Properties link');
+        } catch (e) {
+            // Method 2: Try button if link fails
             try {
-                await page.waitForSelector('lightning-spinner', { 
-                    timeout: 5000, 
-                    state: 'visible' 
-                });
-                this.logger.info('Spinner detected, waiting for it to disappear');
-                
-                await page.waitForSelector('lightning-spinner', { 
-                    timeout: 60000, 
-                    state: 'hidden' 
-                });
-                this.logger.info('Spinner disappeared');
-            } catch (e) {
-                this.logger.info('No spinner or already loaded');
+                await page.click('button:has-text("Filter Properties")', { timeout: 5000 });
+                this.logger.info('Clicked Filter Properties button');
+            } catch (e2) {
+                // Method 3: Click by data-element attribute
+                try {
+                    await page.click('a[data-element="general-enquiry"]', { timeout: 5000 });
+                    this.logger.info('Clicked by data-element attribute');
+                } catch (e3) {
+                    throw new Error('Could not find Filter Properties button/link');
+                }
             }
-            
-            // Additional wait for rendering
-            await page.waitForTimeout(3000);
         }
 
-        // Step 5: Check if data loaded
-        const dataCheck = await page.evaluate(() => {
-            // Look for tables in multiple ways
-            const tables = document.querySelectorAll('table');
-            let foundData = false;
-            let rowCount = 0;
-            let tableLocation = 'not found';
+        // Wait for modal to appear
+        this.logger.info('Waiting for modal to appear');
+        await page.waitForTimeout(5000);
+
+        // Check what appeared after clicking
+        const modalInfo = await page.evaluate(() => {
+            const info = {
+                hasFilterComponent: !!document.querySelector('c-broker-portal-unit-filter-component'),
+                hasSectionDialog: !!document.querySelector('section[role="dialog"]'),
+                hasModal: !!document.querySelector('.slds-modal'),
+                tableCount: document.querySelectorAll('table').length,
+                spinnerCount: document.querySelectorAll('lightning-spinner').length
+            };
             
-            tables.forEach(table => {
-                const tbody = table.querySelector('tbody');
-                if (tbody) {
-                    const rows = tbody.querySelectorAll('tr');
-                    if (rows.length > 0) {
-                        foundData = true;
-                        rowCount = rows.length;
-                        
-                        // Find where this table is located
-                        const parent = table.closest('[id], [class*="modal"], c-broker-portal-unit-filter-component');
-                        if (parent) {
-                            tableLocation = parent.tagName + (parent.id ? `#${parent.id}` : '');
-                        }
-                    }
-                }
-            });
-            
-            return { foundData, rowCount, tableLocation };
-        });
-        
-        this.logger.info('Data check results:', dataCheck);
-        
-        if (!dataCheck.foundData) {
-            // Step 6: Alternative - try to trigger data load directly
-            this.logger.warn('No data found, attempting direct trigger');
-            
-            const directTrigger = await page.evaluate(() => {
-                // Look for any element that might trigger data load
-                const component = document.querySelector('c-broker-portal-unit-filter-component');
-                if (!component) return false;
-                
-                // Dispatch custom events that Lightning might be listening for
-                component.dispatchEvent(new CustomEvent('load'));
-                component.dispatchEvent(new CustomEvent('refresh'));
-                
-                // Try clicking the first available option if dropdowns exist
-                const firstOption = component.querySelector('lightning-base-combobox-item');
-                if (firstOption) {
-                    firstOption.click();
-                    return true;
-                }
-                
-                return false;
-            });
-            
-            if (directTrigger) {
-                await page.waitForTimeout(5000);
-            }
-        }
-        
-        // Final verification
-        const finalStatus = await page.evaluate(() => {
-            const tables = document.querySelectorAll('table');
-            const results = [];
-            
-            tables.forEach((table, index) => {
+            // Get all tables info
+            const tables = [];
+            document.querySelectorAll('table').forEach((table, index) => {
                 const tbody = table.querySelector('tbody');
                 const rows = tbody ? tbody.querySelectorAll('tr') : [];
-                
-                if (rows.length > 0) {
-                    // Get sample from first row
-                    const firstRow = rows[0];
-                    const cells = firstRow.querySelectorAll('td');
-                    const cellTexts = [];
-                    
-                    for (let i = 0; i < Math.min(5, cells.length); i++) {
-                        const cell = cells[i];
-                        const text = cell.textContent?.trim() || '';
-                        cellTexts.push(text.substring(0, 50));
-                    }
-                    
-                    results.push({
-                        tableIndex: index,
-                        rowCount: rows.length,
-                        cellCount: cells.length,
-                        sampleData: cellTexts
-                    });
-                }
+                tables.push({
+                    index,
+                    hasRows: rows.length > 0,
+                    rowCount: rows.length
+                });
             });
+            info.tables = tables;
             
-            return results;
+            return info;
         });
-        
-        this.logger.info('Final table status:', finalStatus);
-        
-        if (finalStatus.length === 0) {
-            // Take diagnostic screenshot
-            await page.screenshot({ path: './no_data_loaded.png' });
-            throw new Error('No table data loaded after all attempts');
+
+        this.logger.info('Modal state after click:', modalInfo);
+
+        // If modal opened but no data, we need to trigger a search
+        if (modalInfo.hasFilterComponent && modalInfo.tableCount === 0) {
+            this.logger.info('Modal opened but no data, looking for search trigger');
+            
+            // Look for any button to trigger search
+            const buttons = await page.$$('c-broker-portal-unit-filter-component button');
+            this.logger.info(`Found ${buttons.length} buttons in filter component`);
+            
+            // Click the first non-close button
+            for (const button of buttons) {
+                const text = await button.textContent();
+                if (text && !text.toLowerCase().includes('close') && !text.toLowerCase().includes('cancel')) {
+                    await button.click();
+                    this.logger.info(`Clicked button: ${text}`);
+                    break;
+                }
+            }
+            
+            // Wait for data to load
+            await page.waitForTimeout(10000);
         }
+
+        // Final check
+        const finalCheck = await page.evaluate(() => {
+            const tables = document.querySelectorAll('table');
+            let totalRows = 0;
+            tables.forEach(table => {
+                const rows = table.querySelectorAll('tbody tr');
+                totalRows += rows.length;
+            });
+            return { tableCount: tables.length, totalRows };
+        });
+
+        this.logger.info('Final state:', finalCheck);
         
-        this.logger.info(`✅ Modal opened with ${finalStatus[0].rowCount} rows`);
+        if (finalCheck.totalRows === 0) {
+            throw new Error('No data rows found after opening modal');
+        }
+
         return true;
 
     } catch (error) {
-        this.logger.error('Failed to open property modal', { 
-            error: error.message,
-            stack: error.stack 
-        });
-        
-        // Take error screenshot
-        await page.screenshot({ path: './error_modal_opening.png' });
+        this.logger.error('Failed to open property modal', { error: error.message });
         throw error;
     }
 }
-
 /**
  * Alternative extraction method for Lightning Web Components
  * This handles dynamic data that might not have consistent IDs
