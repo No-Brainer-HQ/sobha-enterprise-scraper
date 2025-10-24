@@ -831,114 +831,96 @@ class EnterpriseSobhaPortalScraper {
     }
 
 /**
- * ALTERNATIVE SOLUTION - Waits for actual content instead of counting cells
+ * DIRECT INVESTIGATION - Let's see exactly what's happening
  */
 async openPropertyModal(page) {
     try {
-        this.logger.info('Opening property modal - Alternative approach');
+        this.logger.info('INVESTIGATION: Opening property modal');
 
         await page.waitForTimeout(3000);
 
+        // Take screenshot before clicking
+        await page.screenshot({ path: './before_click.png', fullPage: false });
+        this.logger.info('Screenshot saved: before_click.png');
+
         // Click Filter Properties
-        this.logger.info('Clicking Filter Properties button');
+        this.logger.info('Clicking Filter Properties');
         await page.click('a:has-text("Filter Properties")');
-        this.logger.info('✅ Filter Properties clicked');
-
-        // Wait for modal structure
-        await page.waitForTimeout(5000);
-
-        // Wait for spinner to disappear using Playwright's method
-        this.logger.info('Checking for spinner...');
-        const spinnerSelector = 'lightning-spinner';
         
-        try {
-            // First check if spinner exists
-            const spinnerExists = await page.isVisible(spinnerSelector);
-            
-            if (spinnerExists) {
-                this.logger.info('Spinner detected, waiting for it to disappear (up to 40 seconds)...');
-                await page.waitForSelector(spinnerSelector, { 
-                    state: 'hidden', 
-                    timeout: 40000 
-                });
-                this.logger.info('✅ Spinner disappeared');
-            } else {
-                this.logger.info('No spinner detected');
-            }
-        } catch (e) {
-            this.logger.warn('Spinner handling error, continuing anyway');
-        }
+        // Take screenshot immediately after click
+        await page.waitForTimeout(2000);
+        await page.screenshot({ path: './after_click_2s.png', fullPage: false });
+        this.logger.info('Screenshot saved: after_click_2s.png');
 
-        // Additional wait for data to render after spinner
-        this.logger.info('Waiting 10 seconds for data to render after spinner...');
+        // Wait and take another screenshot
         await page.waitForTimeout(10000);
+        await page.screenshot({ path: './after_click_12s.png', fullPage: false });
+        this.logger.info('Screenshot saved: after_click_12s.png');
 
-        // Wait for table rows with actual content (not empty rows)
-        this.logger.info('Waiting for table rows with content...');
+        // Check what's visible using Playwright methods (not evaluate)
+        const modalVisible = await page.isVisible('.slds-modal');
+        const dialogVisible = await page.isVisible('[role="dialog"]');
+        const filterComponentVisible = await page.isVisible('c-broker-portal-unit-filter-component');
+        const tableVisible = await page.isVisible('table');
+        const spinnerVisible = await page.isVisible('lightning-spinner');
         
-        try {
-            // Wait for at least one row with actual text content
-            await page.waitForFunction(() => {
-                const rows = document.querySelectorAll('table tbody tr');
-                if (rows.length === 0) return false;
-                
-                // Check if any row has meaningful content
-                for (const row of rows) {
-                    const text = row.textContent?.trim() || '';
-                    // Check if row has substantial text (not just whitespace or very short)
-                    if (text.length > 20) {
-                        console.log('Found row with content:', text.substring(0, 50));
-                        return true;
-                    }
-                }
-                return false;
-            }, { timeout: 20000 });
-            
-            this.logger.info('✅ Found table rows with content');
-        } catch (e) {
-            this.logger.warn('Timeout waiting for content, checking current state...');
-        }
-
-        // Final verification - just check if we have ANY rows with text
-        const tableStatus = await page.evaluate(() => {
-            const tables = document.querySelectorAll('table');
-            const results = [];
-            
-            tables.forEach((table, idx) => {
-                const rows = table.querySelectorAll('tbody tr');
-                let contentRows = 0;
-                
-                rows.forEach(row => {
-                    const text = row.textContent?.trim() || '';
-                    if (text.length > 10) { // Any row with more than 10 characters
-                        contentRows++;
-                    }
-                });
-                
-                if (contentRows > 0) {
-                    results.push({
-                        tableIndex: idx,
-                        totalRows: rows.length,
-                        rowsWithContent: contentRows
-                    });
-                }
-            });
-            
-            return results;
+        this.logger.info('Visibility check:', {
+            modal: modalVisible,
+            dialog: dialogVisible,
+            filterComponent: filterComponentVisible,
+            table: tableVisible,
+            spinner: spinnerVisible
         });
 
-        this.logger.info('Table status:', tableStatus);
+        // Count elements
+        const tableCount = await page.locator('table').count();
+        const rowCount = await page.locator('tr').count();
+        const buttonCount = await page.locator('button').count();
+        
+        this.logger.info('Element counts:', {
+            tables: tableCount,
+            rows: rowCount,
+            buttons: buttonCount
+        });
 
-        if (tableStatus.length === 0) {
-            throw new Error('No tables with content found after waiting');
+        // Get page text to see if any error message
+        const bodyText = await page.locator('body').textContent();
+        const hasError = bodyText.includes('error') || bodyText.includes('Error');
+        const hasLoading = bodyText.includes('Loading') || bodyText.includes('loading');
+        
+        this.logger.info('Page status:', {
+            hasError,
+            hasLoading,
+            bodyLength: bodyText.length
+        });
+
+        // Try to find ANY clickable element that might trigger data
+        const clickableButtons = await page.$$('button:visible');
+        this.logger.info(`Found ${clickableButtons.length} visible buttons`);
+        
+        // Get button texts
+        const buttonTexts = [];
+        for (let i = 0; i < Math.min(5, clickableButtons.length); i++) {
+            const text = await clickableButtons[i].textContent();
+            buttonTexts.push(text?.trim() || 'no text');
         }
+        this.logger.info('First 5 button texts:', buttonTexts);
 
-        this.logger.info(`✅ Modal opened with ${tableStatus[0].rowsWithContent} rows of data`);
+        // Final screenshot
+        await page.waitForTimeout(10000);
+        await page.screenshot({ path: './final_state.png', fullPage: false });
+        this.logger.info('Screenshot saved: final_state.png');
+
+        // Store screenshots in dataset for download
+        await Dataset.pushData({
+            type: 'screenshots',
+            message: 'Screenshots saved to: before_click.png, after_click_2s.png, after_click_12s.png, final_state.png'
+        });
+
         return true;
 
     } catch (error) {
-        this.logger.error('Failed to open property modal', { error: error.message });
-        await page.screenshot({ path: './modal_error_state.png', fullPage: false });
+        this.logger.error('Investigation failed', { error: error.message });
         throw error;
     }
 }
