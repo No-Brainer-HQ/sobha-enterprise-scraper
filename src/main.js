@@ -1039,6 +1039,103 @@ async extractPropertyData(page) {
         return [];
     }
 }
+
+/**
+ * Simple extraction that doesn't validate cell count
+ */
+async extractPropertyData(page) {
+    try {
+        this.logger.info('Extracting property data - flexible approach');
+
+        await page.waitForTimeout(2000);
+
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            
+            // Get ALL tables and try to extract from any with rows
+            const tables = document.querySelectorAll('table');
+            
+            for (const table of tables) {
+                const tbody = table.querySelector('tbody');
+                if (!tbody) continue;
+                
+                const rows = tbody.querySelectorAll('tr');
+                if (rows.length === 0) continue;
+                
+                console.log(`Found table with ${rows.length} rows, attempting extraction...`);
+                
+                rows.forEach((row, index) => {
+                    try {
+                        const cells = row.querySelectorAll('td');
+                        
+                        // Don't validate cell count - just extract what's there
+                        if (cells.length > 0) {
+                            const cellTexts = Array.from(cells).map(cell => 
+                                cell.textContent?.trim() || ''
+                            );
+                            
+                            // Only process if row has actual content
+                            const hasContent = cellTexts.some(text => text.length > 0);
+                            
+                            if (hasContent) {
+                                const property = {
+                                    rowIndex: index + 1,
+                                    cellCount: cells.length,
+                                    // Try to map to expected fields (adjust indices if needed)
+                                    project: cellTexts[0] || '',
+                                    subProject: cellTexts[1] || '',
+                                    unitType: cellTexts[2] || '',
+                                    floor: cellTexts[3] || '',
+                                    unitNo: cellTexts[4] || '',
+                                    totalUnitArea: cellTexts[5] || '',
+                                    startingPrice: cellTexts[6] || '',
+                                    
+                                    // Store all raw data for debugging
+                                    rawData: cellTexts
+                                };
+                                
+                                extractedProperties.push(property);
+                                
+                                // Log first few for debugging
+                                if (index < 3) {
+                                    console.log(`Row ${index + 1} (${cells.length} cells):`, cellTexts.join(' | '));
+                                }
+                            }
+                        }
+                    } catch (rowError) {
+                        console.error(`Error in row ${index}:`, rowError.message);
+                    }
+                });
+                
+                // If we got data from this table, stop
+                if (extractedProperties.length > 0) {
+                    console.log(`Extracted ${extractedProperties.length} properties from table`);
+                    break;
+                }
+            }
+            
+            return extractedProperties;
+        });
+
+        this.logger.info(`✅ Extracted ${properties.length} properties`);
+        
+        if (properties.length > 0) {
+            // Log detailed info about what we extracted
+            this.logger.info('Extraction summary:', {
+                total: properties.length,
+                firstProperty: properties[0],
+                cellCounts: properties.slice(0, 5).map(p => p.cellCount)
+            });
+        }
+
+        this.metrics.recordPropertiesScraped(properties.length);
+        return properties;
+
+    } catch (error) {
+        this.logger.error('Failed to extract property data', { error: error.message });
+        return [];
+    }
+}
 /**
  * Extract property data - matching the structure from screenshot
  * Columns: Project, Sub Project, Unit Type, Floor, Unit No., Total Unit Area, Starting Price
