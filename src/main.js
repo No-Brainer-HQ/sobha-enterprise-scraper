@@ -831,233 +831,251 @@ class EnterpriseSobhaPortalScraper {
     }
 
 /**
- * WORKING VERSION: Using exact selectors from live website
+ * DIAGNOSTIC: Find out why table isn't loading
+ * Replace your openPropertyModal function with this temporarily
  */
 async openPropertyModal(page) {
     try {
-        this.logger.info('Opening property listings modal');
+        this.logger.info('🔍 DIAGNOSTIC: Opening property modal');
 
         // Wait for page to stabilize
         await page.waitForTimeout(3000);
 
-        // Find and click the "Filter Properties" button
+        // Click Filter Properties button
         this.logger.info('Looking for Filter Properties button');
         
-        const lightningFilterSelectors = [
-            'a[data-element="general-enquiry"]:has-text("Filter Properties")',
-            'a.btn:has-text("Filter Properties")',
-            'a:has-text("Filter Properties")',
-            'button:has-text("Filter Properties")',
+        const clicked = await page.evaluate(() => {
+            // Find the button/link
+            const selectors = [
+                'a[data-element="general-enquiry"]:has-text("Filter Properties")',
+                'a.btn:has-text("Filter Properties")',
+                'a:has-text("Filter Properties")',
+                'button:has-text("Filter Properties")',
+                // Also try finding by text content
+                'a', 'button'
+            ];
+            
+            for (const selector of selectors) {
+                const elements = document.querySelectorAll(selector);
+                for (const el of elements) {
+                    const text = el.textContent || '';
+                    if (text.includes('Filter Properties')) {
+                        console.log(`Clicking: ${el.tagName} - ${text}`);
+                        el.click();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        });
+
+        if (!clicked) {
+            throw new Error('Could not click Filter Properties button');
+        }
+
+        this.logger.info('Button clicked, waiting for modal to appear');
+
+        // Wait a bit for modal to start loading
+        await page.waitForTimeout(5000);
+
+        // DIAGNOSTIC: Check what's actually in the DOM
+        const diagnosticInfo = await page.evaluate(() => {
+            const info = {
+                timestamp: new Date().toISOString(),
+                modalStructures: [],
+                tables: [],
+                spinners: [],
+                filterComponents: [],
+                iframes: [],
+                shadowRoots: []
+            };
+
+            // Check for any modal-like structures
+            const modalSelectors = [
+                '[role="dialog"]',
+                '.slds-modal',
+                'section[role="dialog"]',
+                '[class*="modal"]',
+                'c-broker-portal-unit-filter-component section',
+                '[id*="modal"]'
+            ];
+
+            modalSelectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                if (elements.length > 0) {
+                    elements.forEach(el => {
+                        info.modalStructures.push({
+                            selector,
+                            id: el.id || 'no-id',
+                            classes: el.className,
+                            visible: el.offsetParent !== null,
+                            childrenCount: el.children.length,
+                            innerHTML: el.innerHTML.substring(0, 500)
+                        });
+                    });
+                }
+            });
+
+            // Check for tables anywhere
+            document.querySelectorAll('table').forEach(table => {
+                const tbody = table.querySelector('tbody');
+                const rows = tbody ? tbody.querySelectorAll('tr') : [];
+                info.tables.push({
+                    id: table.id || 'no-id',
+                    classes: table.className,
+                    location: table.closest('[id]')?.id || 'unknown-parent',
+                    visible: table.offsetParent !== null,
+                    rowCount: rows.length,
+                    firstRowHTML: rows[0]?.innerHTML.substring(0, 200) || 'no-rows'
+                });
+            });
+
+            // Check for spinners
+            document.querySelectorAll('lightning-spinner, .slds-spinner, [class*="spinner"]').forEach(spinner => {
+                info.spinners.push({
+                    tag: spinner.tagName,
+                    classes: spinner.className,
+                    visible: spinner.offsetParent !== null
+                });
+            });
+
+            // Check filter component
+            const filterComp = document.querySelector('c-broker-portal-unit-filter-component');
+            if (filterComp) {
+                info.filterComponents.push({
+                    exists: true,
+                    innerHTML: filterComp.innerHTML.substring(0, 1000),
+                    childElements: Array.from(filterComp.children).map(child => ({
+                        tag: child.tagName,
+                        id: child.id,
+                        classes: child.className
+                    }))
+                });
+            }
+
+            // Check for iframes (data might be in iframe)
+            document.querySelectorAll('iframe').forEach(iframe => {
+                info.iframes.push({
+                    src: iframe.src,
+                    id: iframe.id,
+                    visible: iframe.offsetParent !== null
+                });
+            });
+
+            // Check for shadow DOM
+            document.querySelectorAll('*').forEach(el => {
+                if (el.shadowRoot) {
+                    info.shadowRoots.push({
+                        tag: el.tagName,
+                        id: el.id,
+                        hasShadow: true
+                    });
+                }
+            });
+
+            return info;
+        });
+
+        this.logger.info('🔍 DIAGNOSTIC DOM Analysis:', diagnosticInfo);
+
+        // Try waiting for different selectors
+        const waitSelectors = [
+            '[id^="modal-content-id-"]',
+            'c-broker-portal-unit-filter-component table',
+            '.customFilterTable',
+            'table.slds-table',
+            'tbody[lwc-774enseH4rp]'
         ];
 
-        let buttonFound = false;
-        for (const selector of lightningFilterSelectors) {
+        for (const selector of waitSelectors) {
             try {
-                await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
-                this.logger.info(`Found button: ${selector}`);
-                await page.click(selector);
-                buttonFound = true;
+                this.logger.info(`Waiting for selector: ${selector}`);
+                await page.waitForSelector(selector, { timeout: 5000 });
+                this.logger.info(`✅ Found: ${selector}`);
                 break;
-            } catch (error) {
-                this.logger.debug(`Selector failed: ${selector}`);
+            } catch (e) {
+                this.logger.info(`❌ Not found: ${selector}`);
             }
         }
 
-        if (!buttonFound) {
-            throw new Error('Filter Properties button not found');
-        }
-
-        // Wait for modal section to appear (using your exact structure)
-        this.logger.info('Waiting for property modal to open (20 second timeout)');
-        await page.waitForSelector('c-broker-portal-unit-filter-component section', { 
-            timeout: 20000,  // Increased to 20 seconds
-            state: 'attached'  // Changed to 'attached' instead of 'visible'
-        });
-
-        // Additional wait to ensure modal is fully rendered
-        await page.waitForTimeout(2000);
-        
-        // Verify modal is actually there and interactive
-        const modalReady = await page.evaluate(() => {
-            const section = document.querySelector('c-broker-portal-unit-filter-component section');
-            return section && section.offsetParent !== null;
-        });
-        
-        if (!modalReady) {
-            this.logger.warn('Modal section found but not interactive, waiting more...');
-            await page.waitForTimeout(3000);
-        }
-
-        this.logger.info('Modal opened, checking for errors');
-
-        // Check for CSS/Aura error
-        const hasError = await page.evaluate(() => {
-            const errorDialog = document.querySelector('#auraError, #auraErrorMessage');
-            if (errorDialog && errorDialog.offsetParent !== null) {
-                return errorDialog.textContent || 'Unknown error';
-            }
-            return null;
-        });
-
-        if (hasError && hasError.includes('CSS Error')) {
-            this.logger.warn('CSS Error detected, reloading modal');
-            // Click refresh on error dialog
-            await page.click('#auraErrorReload').catch(() => {});
-            await page.waitForTimeout(3000);
-            // Try clicking filter button again
-            await page.click('a[data-element="general-enquiry"]:has-text("Filter Properties")');
-            await page.waitForTimeout(2000);
-        }
-
-        // Wait for YOUR EXACT spinner selector to disappear
-        this.logger.info('Waiting for Lightning spinner to disappear (up to 60 seconds)...');
-        const spinnerSelector = 'c-broker-portal-unit-filter-component lightning-spinner';
-        
-        // First, wait for spinner to appear (it might take time to show up)
-        try {
-            await page.waitForSelector(spinnerSelector, { 
-                timeout: 5000, 
-                state: 'attached' 
+        // Final check after waiting
+        const finalCheck = await page.evaluate(() => {
+            const tables = document.querySelectorAll('table');
+            const rows = document.querySelectorAll('tr');
+            const cells = document.querySelectorAll('td');
+            
+            // Check for data in any table
+            let dataFound = false;
+            let sampleData = [];
+            
+            tables.forEach(table => {
+                const tbody = table.querySelector('tbody');
+                if (tbody) {
+                    const dataRows = tbody.querySelectorAll('tr');
+                    if (dataRows.length > 0) {
+                        dataFound = true;
+                        const firstRow = dataRows[0];
+                        const cells = firstRow.querySelectorAll('td');
+                        cells.forEach((cell, i) => {
+                            if (i < 5) {
+                                sampleData.push(cell.textContent?.trim() || '');
+                            }
+                        });
+                    }
+                }
             });
-            this.logger.info('Spinner detected, waiting for it to disappear...');
-        } catch (e) {
-            this.logger.info('No spinner detected initially, checking if data is already loaded...');
-        }
-        
-        let spinnerGone = false;
-        let attempts = 0;
-        const maxAttempts = 60;  // 60 attempts * 1 second = 60 seconds
-        
-        while (!spinnerGone && attempts < maxAttempts) {
-            attempts++;
-            
-            spinnerGone = await page.evaluate((selector) => {
-                const spinner = document.querySelector(selector);
-                // Also check if table data is already loaded
-                const modalContent = document.querySelector('[id^="modal-content-id-"]');
-                const hasData = modalContent && modalContent.querySelector('table tbody tr');
-                
-                // Spinner is gone if it doesn't exist OR if data is loaded
-                return !spinner || spinner.offsetParent === null || hasData;
-            }, spinnerSelector);
-            
-            if (spinnerGone) {
-                this.logger.info(`✅ Spinner disappeared/data loaded after ${attempts} seconds`);
-                break;
-            }
-            
-            if (attempts % 10 === 0) {
-                this.logger.info(`Still waiting for spinner... (${attempts}s elapsed)`);
-            }
-            
-            await page.waitForTimeout(1000);  // Check every 1 second instead of 2
-        }
-        
-        if (!spinnerGone) {
-            this.logger.warn('Spinner wait timeout after 60 seconds, proceeding anyway...');
-        }
 
-        // Extra wait for content to render
-        await page.waitForTimeout(3000);
-
-        // Wait for table with dynamic modal ID
-        this.logger.info('Waiting for table to load...');
-        
-        // The modal has dynamic ID, so we look for pattern
-        await page.waitForSelector('[id^="modal-content-id-"] table tbody', {
-            timeout: 30000,
-            state: 'visible'
-        });
-
-        // Debug - see what we found
-        const tableInfo = await page.evaluate(() => {
-            // Find modal content div with dynamic ID
-            const modalContent = document.querySelector('[id^="modal-content-id-"]');
-            const table = modalContent ? modalContent.querySelector('table') : null;
-            const tbody = table ? table.querySelector('tbody') : null;
-            const rows = tbody ? tbody.querySelectorAll('tr') : [];
-            
             return {
-                hasModalContent: !!modalContent,
-                modalId: modalContent?.id || 'not found',
-                hasTable: !!table,
-                hasTbody: !!tbody,
-                rowCount: rows.length,
-                firstRowCells: rows[0] ? rows[0].querySelectorAll('td').length : 0
+                tableCount: tables.length,
+                totalRows: rows.length,
+                totalCells: cells.length,
+                dataFound,
+                sampleData,
+                bodyHTML: document.body.innerHTML.length
             };
         });
 
-        this.logger.info('Table detection results:', tableInfo);
+        this.logger.info('🔍 DIAGNOSTIC Final Check:', finalCheck);
 
-        // Wait for rows to load
-        this.logger.info('Waiting for property rows to load...');
-        
-        let rowsLoaded = false;
-        for (let i = 0; i < 10; i++) {
-            const rowCount = await page.evaluate(() => {
-                const modalContent = document.querySelector('[id^="modal-content-id-"]');
-                if (!modalContent) return 0;
-                const tbody = modalContent.querySelector('table tbody');
-                if (!tbody) return 0;
-                return tbody.querySelectorAll('tr').length;
-            });
-            
-            this.logger.info(`Check ${i + 1}/10: Found ${rowCount} rows`);
-            
-            if (rowCount > 0) {
-                this.logger.info(`✅ Table loaded with ${rowCount} rows`);
-                rowsLoaded = true;
-                break;
-            }
-            
-            await page.waitForTimeout(3000);
-        }
-
-        if (!rowsLoaded) {
-            // Take screenshot for debugging
-            await page.screenshot({ path: './debug_no_rows.png', fullPage: false });
-            throw new Error('No rows loaded in table after waiting');
-        }
-
-        // Final verification
-        const finalStatus = await page.evaluate(() => {
-            const modalContent = document.querySelector('[id^="modal-content-id-"]');
-            const tbody = modalContent ? modalContent.querySelector('table tbody') : null;
-            const rows = tbody ? tbody.querySelectorAll('tr') : [];
-            
-            // Get sample data from first row
-            let firstRowData = null;
-            if (rows.length > 0) {
-                const cells = rows[0].querySelectorAll('td');
-                firstRowData = Array.from(cells).map(cell => cell.textContent?.trim() || '').slice(0, 8);
-            }
-            
-            return {
-                modalId: modalContent?.id || 'not found',
-                rowCount: rows.length,
-                cellsPerRow: rows[0] ? rows[0].querySelectorAll('td').length : 0,
-                firstRowSample: firstRowData,
-                hasSpinner: !!document.querySelector('lightning-spinner')
-            };
+        // Take screenshot for debugging
+        await page.screenshot({ 
+            path: './diagnostic_modal_state.png', 
+            fullPage: false 
         });
 
-        this.logger.info('Final table status:', finalStatus);
+        this.logger.info('Screenshot saved to diagnostic_modal_state.png');
 
-        if (finalStatus.rowCount === 0) {
-            throw new Error('No property rows found in table');
+        // If no data found, might need to trigger a different action
+        if (!finalCheck.dataFound) {
+            this.logger.warn('No data found in tables. Checking for alternative data loading methods...');
+            
+            // Check if there's a search or submit button to trigger
+            const triggerSearch = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a'));
+                for (const btn of buttons) {
+                    const text = (btn.textContent || btn.value || '').toLowerCase();
+                    if (text.includes('search') || text.includes('apply') || text.includes('load') || text.includes('show')) {
+                        console.log(`Found potential trigger: ${text}`);
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            });
+
+            if (triggerSearch) {
+                this.logger.info('Clicked additional search/load button');
+                await page.waitForTimeout(5000);
+            }
         }
 
-        this.logger.info(`✅ Property modal opened successfully with ${finalStatus.rowCount} rows`);
         return true;
 
     } catch (error) {
-        this.logger.error('Failed to open property modal', { 
+        this.logger.error('🔍 DIAGNOSTIC: Modal opening failed', { 
             error: error.message,
             stack: error.stack 
         });
-        
-        // Take screenshot on error
-        await page.screenshot({ path: './error_modal_state.png', fullPage: false });
         throw error;
     }
 }
