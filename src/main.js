@@ -831,135 +831,214 @@ class EnterpriseSobhaPortalScraper {
     }
 
 /**
- * SOLUTION: Handle Lightning Web Components dynamic data loading
- * The issue is that the table data isn't loading after clicking Filter Properties
- * This version will handle the Lightning component lifecycle properly
+ * ALTERNATIVE SOLUTION - Waits for actual content instead of counting cells
  */
-
-/**
- * FINAL WORKING SOLUTION - Handles the 10-20 second loading time
- * Based on actual screenshots showing the modal behavior
- */
-
 async openPropertyModal(page) {
     try {
-        this.logger.info('Opening property modal with proper wait times');
+        this.logger.info('Opening property modal - Alternative approach');
 
         await page.waitForTimeout(3000);
 
-        // Step 1: Click Filter Properties - this works!
+        // Click Filter Properties
         this.logger.info('Clicking Filter Properties button');
         await page.click('a:has-text("Filter Properties")');
         this.logger.info('✅ Filter Properties clicked');
 
-        // Step 2: Wait for modal to appear (it appears blank first)
-        this.logger.info('Waiting for modal to appear (blank state)');
-        await page.waitForTimeout(3000);
-
-        // Step 3: Wait for spinner to appear and then disappear (10-20 seconds)
-        this.logger.info('Waiting for data to load (this takes 10-20 seconds)...');
-        
-        // Check for spinner
-        const spinnerVisible = await page.isVisible('lightning-spinner, .slds-spinner').catch(() => false);
-        if (spinnerVisible) {
-            this.logger.info('Spinner detected, waiting for it to disappear...');
-            
-            // Wait up to 30 seconds for spinner to disappear
-            await page.waitForSelector('lightning-spinner, .slds-spinner', { 
-                state: 'hidden', 
-                timeout: 30000 
-            }).catch(() => {
-                this.logger.warn('Spinner wait timeout, continuing anyway');
-            });
-            
-            this.logger.info('Spinner disappeared');
-        }
-        
-        // Step 4: Additional wait for table to render after spinner
-        this.logger.info('Waiting for table data to render...');
+        // Wait for modal structure
         await page.waitForTimeout(5000);
+
+        // Wait for spinner to disappear using Playwright's method
+        this.logger.info('Checking for spinner...');
+        const spinnerSelector = 'lightning-spinner';
         
-        // Step 5: Look for the table data
-        this.logger.info('Checking for table data...');
-        
-        // Try multiple table selectors
-        const tableSelectors = [
-            'table tbody tr',
-            '.slds-table tbody tr',
-            '[role="dialog"] table tbody tr',
-            'section[role="dialog"] table tbody tr'
-        ];
-        
-        let tableFound = false;
-        for (const selector of tableSelectors) {
-            try {
-                await page.waitForSelector(selector, { timeout: 5000 });
-                tableFound = true;
-                this.logger.info(`✅ Table found with selector: ${selector}`);
-                break;
-            } catch (e) {
-                this.logger.debug(`Table not found with: ${selector}`);
+        try {
+            // First check if spinner exists
+            const spinnerExists = await page.isVisible(spinnerSelector);
+            
+            if (spinnerExists) {
+                this.logger.info('Spinner detected, waiting for it to disappear (up to 40 seconds)...');
+                await page.waitForSelector(spinnerSelector, { 
+                    state: 'hidden', 
+                    timeout: 40000 
+                });
+                this.logger.info('✅ Spinner disappeared');
+            } else {
+                this.logger.info('No spinner detected');
             }
+        } catch (e) {
+            this.logger.warn('Spinner handling error, continuing anyway');
         }
+
+        // Additional wait for data to render after spinner
+        this.logger.info('Waiting 10 seconds for data to render after spinner...');
+        await page.waitForTimeout(10000);
+
+        // Wait for table rows with actual content (not empty rows)
+        this.logger.info('Waiting for table rows with content...');
         
-        // Step 6: Verify data loaded
-        const dataCheck = await page.evaluate(() => {
+        try {
+            // Wait for at least one row with actual text content
+            await page.waitForFunction(() => {
+                const rows = document.querySelectorAll('table tbody tr');
+                if (rows.length === 0) return false;
+                
+                // Check if any row has meaningful content
+                for (const row of rows) {
+                    const text = row.textContent?.trim() || '';
+                    // Check if row has substantial text (not just whitespace or very short)
+                    if (text.length > 20) {
+                        console.log('Found row with content:', text.substring(0, 50));
+                        return true;
+                    }
+                }
+                return false;
+            }, { timeout: 20000 });
+            
+            this.logger.info('✅ Found table rows with content');
+        } catch (e) {
+            this.logger.warn('Timeout waiting for content, checking current state...');
+        }
+
+        // Final verification - just check if we have ANY rows with text
+        const tableStatus = await page.evaluate(() => {
             const tables = document.querySelectorAll('table');
             const results = [];
             
-            tables.forEach((table, index) => {
-                const tbody = table.querySelector('tbody');
-                const rows = tbody ? tbody.querySelectorAll('tr') : [];
+            tables.forEach((table, idx) => {
+                const rows = table.querySelectorAll('tbody tr');
+                let contentRows = 0;
                 
-                if (rows.length > 0) {
-                    // Check if this looks like property data (has multiple cells)
-                    const firstRow = rows[0];
-                    const cells = firstRow.querySelectorAll('td');
-                    
-                    if (cells.length >= 7) { // Property table has 7+ columns
-                        results.push({
-                            tableIndex: index,
-                            rowCount: rows.length,
-                            cellCount: cells.length,
-                            isPropertyTable: true
-                        });
+                rows.forEach(row => {
+                    const text = row.textContent?.trim() || '';
+                    if (text.length > 10) { // Any row with more than 10 characters
+                        contentRows++;
                     }
+                });
+                
+                if (contentRows > 0) {
+                    results.push({
+                        tableIndex: idx,
+                        totalRows: rows.length,
+                        rowsWithContent: contentRows
+                    });
                 }
             });
             
             return results;
         });
-        
-        this.logger.info('Table data check:', dataCheck);
-        
-        if (dataCheck.length === 0 || !dataCheck.some(t => t.isPropertyTable)) {
-            // One more wait and retry
-            this.logger.warn('No property table found, waiting longer...');
-            await page.waitForTimeout(10000);
-            
-            // Final check
-            const finalRowCount = await page.evaluate(() => {
-                const rows = document.querySelectorAll('table tbody tr');
-                return rows.length;
-            });
-            
-            if (finalRowCount === 0) {
-                throw new Error('No property data loaded after extended wait');
-            }
+
+        this.logger.info('Table status:', tableStatus);
+
+        if (tableStatus.length === 0) {
+            throw new Error('No tables with content found after waiting');
         }
-        
-        this.logger.info('✅ Property modal opened successfully with data');
+
+        this.logger.info(`✅ Modal opened with ${tableStatus[0].rowsWithContent} rows of data`);
         return true;
 
     } catch (error) {
         this.logger.error('Failed to open property modal', { error: error.message });
-        
-        // Take screenshot for debugging
-        await page.screenshot({ path: './modal_error.png', fullPage: false });
+        await page.screenshot({ path: './modal_error_state.png', fullPage: false });
         throw error;
     }
 }
 
+/**
+ * Simple extraction that doesn't validate cell count
+ */
+async extractPropertyData(page) {
+    try {
+        this.logger.info('Extracting property data - flexible approach');
+
+        await page.waitForTimeout(2000);
+
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            
+            // Get ALL tables and try to extract from any with rows
+            const tables = document.querySelectorAll('table');
+            
+            for (const table of tables) {
+                const tbody = table.querySelector('tbody');
+                if (!tbody) continue;
+                
+                const rows = tbody.querySelectorAll('tr');
+                if (rows.length === 0) continue;
+                
+                console.log(`Found table with ${rows.length} rows, attempting extraction...`);
+                
+                rows.forEach((row, index) => {
+                    try {
+                        const cells = row.querySelectorAll('td');
+                        
+                        // Don't validate cell count - just extract what's there
+                        if (cells.length > 0) {
+                            const cellTexts = Array.from(cells).map(cell => 
+                                cell.textContent?.trim() || ''
+                            );
+                            
+                            // Only process if row has actual content
+                            const hasContent = cellTexts.some(text => text.length > 0);
+                            
+                            if (hasContent) {
+                                const property = {
+                                    rowIndex: index + 1,
+                                    cellCount: cells.length,
+                                    // Try to map to expected fields (adjust indices if needed)
+                                    project: cellTexts[0] || '',
+                                    subProject: cellTexts[1] || '',
+                                    unitType: cellTexts[2] || '',
+                                    floor: cellTexts[3] || '',
+                                    unitNo: cellTexts[4] || '',
+                                    totalUnitArea: cellTexts[5] || '',
+                                    startingPrice: cellTexts[6] || '',
+                                    
+                                    // Store all raw data for debugging
+                                    rawData: cellTexts
+                                };
+                                
+                                extractedProperties.push(property);
+                                
+                                // Log first few for debugging
+                                if (index < 3) {
+                                    console.log(`Row ${index + 1} (${cells.length} cells):`, cellTexts.join(' | '));
+                                }
+                            }
+                        }
+                    } catch (rowError) {
+                        console.error(`Error in row ${index}:`, rowError.message);
+                    }
+                });
+                
+                // If we got data from this table, stop
+                if (extractedProperties.length > 0) {
+                    console.log(`Extracted ${extractedProperties.length} properties from table`);
+                    break;
+                }
+            }
+            
+            return extractedProperties;
+        });
+
+        this.logger.info(`✅ Extracted ${properties.length} properties`);
+        
+        if (properties.length > 0) {
+            // Log detailed info about what we extracted
+            this.logger.info('Extraction summary:', {
+                total: properties.length,
+                firstProperty: properties[0],
+                cellCounts: properties.slice(0, 5).map(p => p.cellCount)
+            });
+        }
+
+        this.metrics.recordPropertiesScraped(properties.length);
+        return properties;
+
+    } catch (error) {
+        this.logger.error('Failed to extract property data', { error: error.message });
+        return [];
+    }
+}
 /**
  * Extract property data - matching the structure from screenshot
  * Columns: Project, Sub Project, Unit Type, Floor, Unit No., Total Unit Area, Starting Price
