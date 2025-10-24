@@ -1061,261 +1061,220 @@ async openPropertyModal(page) {
         throw error;
     }
 }
-
 /**
- * Fixed extraction function for Lightning table data
- * This replaces all the duplicate extractPropertyData functions in your code
+ * Debug version of extraction with detailed logging
+ * Use this temporarily to diagnose what's happening
  */
-async extractPropertyData(page) {
+async extractPropertyDataDebug(page) {
     try {
-        this.logger.info('Starting property data extraction with Lightning table selectors');
+        this.logger.info('🔍 DEBUG: Starting detailed extraction diagnostics');
 
-        // Wait for table to stabilize
         await page.waitForTimeout(3000);
 
-        const properties = await page.evaluate(() => {
-            const extractedProperties = [];
-            
-            // Find the modal content div with dynamic ID
-            const modalContent = document.querySelector('[id^="modal-content-id-"]');
-            if (!modalContent) {
-                console.error('Modal content not found');
-                return [];
-            }
-            
-            // Get the tbody - it has lwc attributes
-            const tbody = modalContent.querySelector('tbody[lwc-774enseH4rp], table tbody');
-            if (!tbody) {
-                console.error('Table tbody not found');
-                return [];
-            }
-            
-            // Get all rows with the specific class
-            const rows = tbody.querySelectorAll('tr.slds-hint-parent, tr[lwc-774enseH4rp]');
-            console.log(`Found ${rows.length} rows to extract`);
-            
-            rows.forEach((row, index) => {
-                try {
-                    // Get all cells in this row
-                    const cells = row.querySelectorAll('td');
-                    
-                    if (cells.length >= 7) {
-                        const getCellText = (cell) => {
-                            // First try to get the title attribute from slds-truncate div
-                            const truncateDiv = cell.querySelector('div.slds-truncate');
-                            if (truncateDiv) {
-                                // Title attribute has the full text without truncation
-                                const title = truncateDiv.getAttribute('title');
-                                if (title) return title.trim();
-                                // Fallback to text content
-                                return truncateDiv.textContent?.trim() || '';
-                            }
-                            // Direct text from cell as last resort
-                            return cell.textContent?.trim() || '';
-                        };
-                        
-                        // Map cells based on data-label attributes for verification
-                        const cellData = {};
-                        cells.forEach(cell => {
-                            const label = cell.getAttribute('data-label');
-                            if (label) {
-                                cellData[label] = getCellText(cell);
-                            }
-                        });
-                        
-                        // Extract based on position (matching your table structure)
-                        // From the HTML: Project Category, Project, Unit Type, Floor, Unit No., Total Unit Area, Starting Price
-                        const property = {
-                            rowIndex: index + 1,
-                            projectCategory: cellData['Project'] || getCellText(cells[0]),
-                            project: cellData['Project'] || getCellText(cells[1]), 
-                            unitType: cellData['Unit Type'] || getCellText(cells[2]),
-                            floor: cellData['Floor'] || getCellText(cells[3]),
-                            unitNo: cellData['Unit No.'] || getCellText(cells[4]),
-                            totalUnitArea: cellData['Total Unit Area'] || getCellText(cells[5]),
-                            startingPrice: cellData['Starting Price'] || getCellText(cells[6]),
-                            
-                            // Extract button/action data if available
-                            recordId: '',
-                            
-                            // Parse numeric values
-                            floorNumber: null,
-                            area: null,
-                            price: null
-                        };
-                        
-                        // Try to get the action button data
-                        const actionCell = cells[cells.length - 1] || cells[7];
-                        if (actionCell) {
-                            const button = actionCell.querySelector('button, lightning-button');
-                            if (button) {
-                                property.recordId = button.getAttribute('name') || 
-                                                  button.getAttribute('data-id') || 
-                                                  button.getAttribute('data-record-id') || '';
-                            }
-                        }
-                        
-                        // Parse numeric values
-                        try {
-                            property.floorNumber = parseInt(property.floor) || null;
-                            property.area = parseFloat(property.totalUnitArea?.replace(/[^0-9.]/g, '')) || null;
-                            property.price = parseFloat(property.startingPrice?.replace(/[^0-9.]/g, '')) || null;
-                        } catch (parseError) {
-                            console.warn(`Failed to parse numeric values for row ${index}:`, parseError);
-                        }
-                        
-                        // Validate that we have essential data
-                        if (property.unitNo || property.project || property.startingPrice) {
-                            extractedProperties.push(property);
-                            console.log(`Extracted property ${index + 1}:`, {
-                                unitNo: property.unitNo,
-                                project: property.project,
-                                price: property.startingPrice
-                            });
-                        } else {
-                            console.warn(`Row ${index + 1} skipped - no essential data found`);
-                        }
-                    } else {
-                        console.warn(`Row ${index + 1} has only ${cells.length} cells, expected at least 7`);
-                    }
-                } catch (rowError) {
-                    console.error(`Error extracting row ${index}:`, rowError.message);
+        // First, let's check what we can see in the DOM
+        const domInfo = await page.evaluate(() => {
+            const info = {
+                hasModal: false,
+                modalId: null,
+                hasTbody: false,
+                tbodySelectors: [],
+                rowCount: 0,
+                rowSelectors: [],
+                firstRowInfo: null,
+                sampleCellData: []
+            };
+
+            // Check for modal
+            const modal = document.querySelector('[id^="modal-content-id-"]');
+            info.hasModal = !!modal;
+            info.modalId = modal?.id || 'not found';
+
+            // Try different tbody selectors
+            const tbodySelectors = [
+                'tbody[lwc-774enseH4rp]',
+                'tbody[lwc-774enseH4rp=""]', 
+                'table.customFilterTable tbody',
+                '.customFilterTable tbody',
+                '[id^="modal-content-id-"] tbody',
+                'tbody'
+            ];
+
+            for (const selector of tbodySelectors) {
+                const tbody = document.querySelector(selector);
+                if (tbody) {
+                    info.tbodySelectors.push(selector);
                 }
-            });
-            
-            console.log(`Successfully extracted ${extractedProperties.length} properties from ${rows.length} rows`);
-            return extractedProperties;
+            }
+
+            // Find the actual tbody
+            const tbody = document.querySelector('[id^="modal-content-id-"] tbody') || 
+                         document.querySelector('tbody');
+            info.hasTbody = !!tbody;
+
+            if (tbody) {
+                // Try different row selectors
+                const rowSelectors = [
+                    'tr.slds-hint-parent',
+                    'tr[lwc-774enseH4rp]',
+                    'tr[lwc-774enseH4rp=""]',
+                    'tr'
+                ];
+
+                for (const selector of rowSelectors) {
+                    const rows = tbody.querySelectorAll(selector);
+                    if (rows.length > 0) {
+                        info.rowSelectors.push(`${selector}: ${rows.length} rows`);
+                    }
+                }
+
+                // Get all rows
+                const rows = tbody.querySelectorAll('tr');
+                info.rowCount = rows.length;
+
+                // Examine first row in detail
+                if (rows.length > 0) {
+                    const firstRow = rows[0];
+                    const cells = firstRow.querySelectorAll('td');
+                    
+                    info.firstRowInfo = {
+                        cellCount: cells.length,
+                        rowClasses: firstRow.className,
+                        rowAttributes: Array.from(firstRow.attributes).map(attr => 
+                            `${attr.name}="${attr.value}"`
+                        ).join(' ')
+                    };
+
+                    // Get data from first 3 cells as sample
+                    for (let i = 0; i < Math.min(3, cells.length); i++) {
+                        const cell = cells[i];
+                        const truncateDiv = cell.querySelector('div.slds-truncate');
+                        
+                        info.sampleCellData.push({
+                            cellIndex: i,
+                            dataLabel: cell.getAttribute('data-label'),
+                            hasTruncateDiv: !!truncateDiv,
+                            titleAttr: truncateDiv?.getAttribute('title'),
+                            textContent: truncateDiv?.textContent?.trim() || cell.textContent?.trim(),
+                            innerHTML: cell.innerHTML.substring(0, 200) // First 200 chars
+                        });
+                    }
+                }
+            }
+
+            return info;
         });
 
-        this.logger.info(`✅ Extracted ${properties.length} properties`);
-        
-        // Log sample of first few properties for verification
-        if (properties.length > 0) {
-            this.logger.info('Sample of extracted properties:', {
-                count: properties.length,
-                firstProperty: properties[0],
-                lastProperty: properties[properties.length - 1]
-            });
-        } else {
-            this.logger.warn('No properties extracted - debugging info:', {
-                modalFound: await page.evaluate(() => !!document.querySelector('[id^="modal-content-id-"]')),
-                tbodyFound: await page.evaluate(() => !!document.querySelector('tbody[lwc-774enseH4rp], tbody')),
-                rowCount: await page.evaluate(() => {
-                    const tbody = document.querySelector('tbody[lwc-774enseH4rp], tbody');
-                    return tbody ? tbody.querySelectorAll('tr.slds-hint-parent').length : 0;
-                }),
-                cellsInFirstRow: await page.evaluate(() => {
-                    const firstRow = document.querySelector('tr.slds-hint-parent');
-                    return firstRow ? firstRow.querySelectorAll('td').length : 0;
-                })
-            });
-            
-            // Take a screenshot for debugging
-            await page.screenshot({ 
-                path: './debug_extraction_failed.png', 
-                fullPage: false 
-            });
-        }
+        this.logger.info('🔍 DEBUG DOM Info:', domInfo);
 
-        this.metrics.recordPropertiesScraped(properties.length);
+        // Now try extraction with detailed logging
+        const properties = await page.evaluate(() => {
+            const extractedProperties = [];
+            const debugLog = [];
 
-        // Apply maxResults limit if specified
-        if (this.input.maxResults && properties.length > this.input.maxResults) {
-            this.logger.info(`Limiting results to ${this.input.maxResults} properties`);
-            return properties.slice(0, this.input.maxResults);
-        }
+            try {
+                // Find modal
+                const modal = document.querySelector('[id^="modal-content-id-"]');
+                if (!modal) {
+                    debugLog.push('ERROR: Modal not found');
+                    return { properties: [], debugLog };
+                }
+                debugLog.push(`Found modal: ${modal.id}`);
 
-        return properties;
+                // Find tbody
+                const tbody = modal.querySelector('tbody') || 
+                            document.querySelector('[id^="modal-content-id-"] tbody');
+                if (!tbody) {
+                    debugLog.push('ERROR: Tbody not found');
+                    return { properties: [], debugLog };
+                }
+                debugLog.push('Found tbody');
+
+                // Get rows - try multiple selectors
+                let rows = tbody.querySelectorAll('tr.slds-hint-parent');
+                if (rows.length === 0) {
+                    rows = tbody.querySelectorAll('tr[lwc-774enseH4rp]');
+                    debugLog.push('Using tr[lwc-774enseH4rp] selector');
+                }
+                if (rows.length === 0) {
+                    rows = tbody.querySelectorAll('tr');
+                    debugLog.push('Using generic tr selector');
+                }
+                
+                debugLog.push(`Found ${rows.length} rows`);
+
+                // Process first 5 rows for debugging
+                const maxRows = Math.min(5, rows.length);
+                for (let i = 0; i < maxRows; i++) {
+                    const row = rows[i];
+                    const cells = row.querySelectorAll('td');
+                    
+                    debugLog.push(`Row ${i}: ${cells.length} cells`);
+
+                    if (cells.length >= 7) {
+                        const property = {
+                            rowIndex: i + 1,
+                            cells: []
+                        };
+
+                        // Extract each cell
+                        for (let j = 0; j < Math.min(8, cells.length); j++) {
+                            const cell = cells[j];
+                            const truncateDiv = cell.querySelector('div.slds-truncate');
+                            
+                            let cellText = '';
+                            if (truncateDiv) {
+                                cellText = truncateDiv.getAttribute('title') || 
+                                          truncateDiv.textContent?.trim() || '';
+                            } else {
+                                cellText = cell.textContent?.trim() || '';
+                            }
+
+                            property.cells.push({
+                                index: j,
+                                label: cell.getAttribute('data-label'),
+                                text: cellText
+                            });
+                        }
+
+                        // Map to expected structure
+                        property.projectCategory = property.cells[0]?.text || '';
+                        property.project = property.cells[1]?.text || '';
+                        property.unitType = property.cells[2]?.text || '';
+                        property.floor = property.cells[3]?.text || '';
+                        property.unitNo = property.cells[4]?.text || '';
+                        property.totalUnitArea = property.cells[5]?.text || '';
+                        property.startingPrice = property.cells[6]?.text || '';
+
+                        extractedProperties.push(property);
+                        debugLog.push(`Extracted property ${i + 1}: Unit ${property.unitNo}`);
+                    }
+                }
+
+            } catch (error) {
+                debugLog.push(`ERROR: ${error.message}`);
+            }
+
+            return { 
+                properties: extractedProperties, 
+                debugLog,
+                totalRowsFound: document.querySelectorAll('[id^="modal-content-id-"] tbody tr').length
+            };
+        });
+
+        this.logger.info('🔍 DEBUG Extraction Results:', {
+            propertiesExtracted: properties.properties.length,
+            totalRows: properties.totalRowsFound,
+            debugLog: properties.debugLog,
+            firstProperty: properties.properties[0]
+        });
+
+        return properties.properties;
 
     } catch (error) {
-        this.logger.error('Failed to extract property data', { 
+        this.logger.error('🔍 DEBUG: Extraction failed', { 
             error: error.message,
             stack: error.stack 
         });
-        
-        // Take error screenshot
-        await page.screenshot({ 
-            path: './error_extraction.png', 
-            fullPage: false 
-        });
-        
-        return [];
-    }
-}
-
-/**
- * Extract property data - keep your original approach
- */
-async extractPropertyData(page) {
-    try {
-        this.logger.info('Starting property data extraction');
-
-        await page.waitForTimeout(2000);
-
-        const properties = await page.evaluate(() => {
-            const extractedProperties = [];
-            
-            // Try multiple selectors for rows
-            let rows = document.querySelectorAll('tr.slds-hint-parent');
-            if (rows.length === 0) {
-                rows = document.querySelectorAll('.customFilterTable tbody tr');
-            }
-            if (rows.length === 0) {
-                rows = document.querySelectorAll('tbody tr');
-            }
-            
-            console.log(`Found ${rows.length} rows to extract`);
-            
-            rows.forEach((row, index) => {
-                try {
-                    const cells = row.querySelectorAll('td');
-                    
-                    if (cells.length >= 7) {
-                        const getCellText = (cell) => {
-                            const div = cell.querySelector('div.slds-truncate');
-                            return div ? (div.getAttribute('title') || div.textContent?.trim() || '') : cell.textContent?.trim() || '';
-                        };
-                        
-                        const button = cells[7]?.querySelector('button');
-                        
-                        const property = {
-                            rowIndex: index + 1,
-                            projectCategory: getCellText(cells[0]),
-                            project: getCellText(cells[1]),
-                            unitType: getCellText(cells[2]),
-                            floor: getCellText(cells[3]),
-                            unitNo: getCellText(cells[4]),
-                            totalUnitArea: getCellText(cells[5]),
-                            startingPrice: getCellText(cells[6]),
-                            recordId: button?.getAttribute('name') || '',
-                            floorNumber: parseInt(getCellText(cells[3])) || null,
-                            area: parseFloat(getCellText(cells[5])) || null,
-                            price: parseFloat(getCellText(cells[6])?.replace(/,/g, '')) || null
-                        };
-                        
-                        if (property.unitNo && property.project) {
-                            extractedProperties.push(property);
-                        }
-                    }
-                } catch (rowError) {
-                    console.error(`Error extracting row ${index}:`, rowError);
-                }
-            });
-            
-            return extractedProperties;
-        });
-
-        this.logger.info(`✅ Extracted ${properties.length} properties`);
-        this.metrics.recordPropertiesScraped(properties.length);
-
-        if (this.input.maxResults && properties.length > this.input.maxResults) {
-            return properties.slice(0, this.input.maxResults);
-        }
-
-        return properties;
-
-    } catch (error) {
-        this.logger.error('Failed to extract property data', { error: error.message });
         return [];
     }
 }
